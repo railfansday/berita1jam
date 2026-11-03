@@ -15,11 +15,15 @@ from datetime import datetime, timedelta
 # ==========================================================================
 BASE_DIR = Path(__file__).parent.resolve()
 DB_PATH = str(BASE_DIR / "database_5menit" / "database.sqlite")
-RSS_FILE = str(BASE_DIR / "rss_list.txt")
-OUTPUT_DIR = str(BASE_DIR) # Output langsung ke folder utama (GitHub Pages)
+
+# ⚠️ PASTIKAN NAMA FILE INI SESUAI DENGAN YANG ADA DI REPO ANDA
+RSS_FILE = str(BASE_DIR / "rss_list.txt") 
+
+# ✅ Simpan file HTML langsung di folder utama
+OUTPUT_DIR = BASE_DIR 
 
 # ⚠️ GANTI URL INI dengan URL GitHub Pages Anda
-BASE_URL = "https://railfan sday.github.io/1jam" 
+BASE_URL = "https://railfansday.github.io/berita1jam" 
 
 ARTICLES_PER_PAGE = 20
 SITE_NAME = "News Portal Indonesia"
@@ -71,10 +75,20 @@ def init_db():
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS artikel (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            link TEXT UNIQUE, title TEXT, content TEXT, gambar TEXT,
+            link TEXT UNIQUE, judul TEXT, konten TEXT, gambar TEXT,
             kategori TEXT DEFAULT 'other', tanggal_publish TEXT, tanggal_update TEXT
         )
     """)
+    cursor.execute("PRAGMA table_info(artikel)")
+    columns = [col[1] for col in cursor.fetchall()]
+    if 'gambar' not in columns:
+        cursor.execute("ALTER TABLE artikel ADD COLUMN gambar TEXT")
+    if 'kategori' not in columns:
+        cursor.execute("ALTER TABLE artikel ADD COLUMN kategori TEXT DEFAULT 'other'")
+    if 'tanggal_publish' not in columns:
+        cursor.execute("ALTER TABLE artikel ADD COLUMN tanggal_publish TEXT")
+    if 'tanggal_update' not in columns:
+        cursor.execute("ALTER TABLE artikel ADD COLUMN tanggal_update TEXT")
     conn.commit()
     conn.close()
 
@@ -87,7 +101,8 @@ def detect_kategori(text):
 
 def extract_full_content(url):
     try:
-        response = requests.get(url, headers=HEADERS, timeout=8)
+        # ✅ PERBAIKAN 1: Timeout dipercepat jadi 3 detik
+        response = requests.get(url, headers=HEADERS, timeout=3)
         if response.status_code != 200: return None, None, None
         soup = BeautifulSoup(response.text, 'html.parser')
 
@@ -126,22 +141,22 @@ def process_single_feed(feed_url):
         conn = sqlite3.connect(DB_PATH, timeout=15)
         cursor = conn.cursor()
         
-        # FILTER WAKTU 1 JAM
+        # FILTER WAKTU 1 JAM (Sesuai nama folder berita1jam)
         batas_waktu = datetime.now() - timedelta(hours=1)
 
-        for entry in feed.entries:
+        # ✅ PERBAIKAN 2: Hanya ambil maksimal 5 artikel terbaru per RSS
+        for entry in feed.entries[:5]:
             link = entry.get('link', '')
             judul = entry.get('title', 'Tanpa Judul')
             if not link: continue
 
-            # --- FILTER WAKTU 1 JAM ---
+            # Filter Waktu
             published_parsed = entry.get('published_parsed') or entry.get('updated_parsed')
             if published_parsed:
                 waktu_terbit = datetime(*published_parsed[:6])
                 if waktu_terbit < batas_waktu:
                     dilewati_lama += 1
                     continue
-            # ---------------------------
 
             cursor.execute("SELECT id FROM artikel WHERE link = ?", (link,))
             if cursor.fetchone():
@@ -176,7 +191,7 @@ def process_single_feed(feed_url):
 
             try:
                 cursor.execute(
-                    "INSERT INTO artikel (link, title, content, gambar, kategori, tanggal_publish, tanggal_update) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                    "INSERT INTO artikel (link, judul, konten, gambar, kategori, tanggal_publish, tanggal_update) VALUES (?, ?, ?, ?, ?, ?, ?)",
                     (link, judul, konten_lengkap, image_url, kategori, tanggal, tanggal_update)
                 )
                 conn.commit()
@@ -203,7 +218,8 @@ def jalankan_scraping():
     print(f"[*] Memulai scraping (HANYA 1 JAM TERAKHIR) dari {len(rss_urls)} RSS...")
     total_baru, total_duplikat, total_lama = 0, 0, 0
     
-    with ThreadPoolExecutor(max_workers=10) as executor:
+    # ✅ PERBAIKAN 3: Kurangi worker jadi 5 agar stabil
+    with ThreadPoolExecutor(max_workers=5) as executor:
         futures = {executor.submit(process_single_feed, url): url for url in rss_urls}
         for future in as_completed(futures):
             b, d, l = future.result()
@@ -212,6 +228,7 @@ def jalankan_scraping():
             total_lama += l
 
     print(f"[SELESAI SCRAPING] Baru: {total_baru} | Duplikat: {total_duplikat} | Dilewati (Lama): {total_lama}\n")
+
 
 # ==========================================================================
 # BAGIAN 2: FUNGSI EXPORT (GENERATE HTML)
@@ -281,14 +298,14 @@ def render_nav(active_cat, available_categories):
         
     return html + '</nav>'
 
-def render_card(row):
-    title = row["title"]
-    content = row["content"]
-    gambar = row["gambar"]
-    kategori = row["kategori"]
-    link = row["link"]
-    tanggal = row["tanggal_publish"]
-    aid = row["id"]
+def render_card(row, filename="index.html"):
+    title = row["judul"] if "judul" in row.keys() else "No Title"
+    content = row["konten"] if "konten" in row.keys() else ""
+    gambar = row["gambar"] if "gambar" in row.keys() else ""
+    kategori = row["kategori"] if "kategori" in row.keys() else "other"
+    link = row["link"] if "link" in row.keys() else "#"
+    tanggal = row["tanggal_publish"] if "tanggal_publish" in row.keys() else ""
+    aid = row["id"] if "id" in row.keys() else ""
 
     img = f'<img src="{esc(gambar)}" alt="{esc(title)}" loading="lazy">' if gambar else ""
     cat_label = kategori.title() if kategori else "Other"
@@ -300,7 +317,7 @@ def render_card(row):
         "image": [gambar] if gambar else [],
         "datePublished": tanggal or datetime.now().isoformat(),
         "dateModified": tanggal or datetime.now().isoformat(),
-        "mainEntityOfPage": f"{BASE_URL}/index.html#artikel-{aid}"
+        "mainEntityOfPage": f"{BASE_URL}/{filename}#artikel-{aid}"
     }, ensure_ascii=False)
 
     return f"""
@@ -318,8 +335,8 @@ def render_card(row):
     </div>
 </article>"""
 
-def render_page(title, desc, canonical, rows, active_cat, available_categories, page_nav=""):
-    cards = "".join(render_card(r) for r in rows)
+def render_page(title, desc, canonical, rows, active_cat, available_categories, page_nav="", filename="index.html"):
+    cards = "".join(render_card(r, filename) for r in rows)
     head = HTML_HEAD.format(title=esc(title), desc=esc(desc), canonical=esc(canonical), site=esc(SITE_NAME), nav=render_nav(active_cat, available_categories))
     body = f'<h1 style="color:#1e293b;border-left:5px solid #2563eb;padding-left:15px;margin-bottom:30px;">{esc(title)}</h1>'
     body += cards + page_nav
@@ -327,6 +344,8 @@ def render_page(title, desc, canonical, rows, active_cat, available_categories, 
 
 def jalankan_export():
     print("[*] Exporting HTML...")
+    # Tidak perlu mkdir karena output langsung ke BASE_DIR
+
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
     c = conn.cursor()
@@ -342,10 +361,11 @@ def jalankan_export():
     if total > 0:
         pages = [all_rows[i:i+ARTICLES_PER_PAGE] for i in range(0, total, ARTICLES_PER_PAGE)]
         for i, page_rows in enumerate(pages, start=1):
-            fn = "index.html" if i == 1 else f"page{i}.html"
-            canon = f"{BASE_URL}/" if i == 1 else f"{BASE_URL}/{fn}"
-            title = f"{SITE_NAME} - Latest News" if i == 1 else f"{SITE_NAME} - Page {i}"
-            
+            if i == 1:
+                fn, canon, title = "index.html", f"{BASE_URL}/", f"{SITE_NAME} - Latest News"
+            else:
+                fn, canon, title = f"page{i}.html", f"{BASE_URL}/page{i}.html", f"{SITE_NAME} - Page {i}"
+
             nav = '<div class="pagination">'
             for j in range(1, len(pages)+1):
                 href = "index.html" if j == 1 else f"page{j}.html"
@@ -353,7 +373,7 @@ def jalankan_export():
                 nav += f'<a href="{href}"{a}>{j}</a>'
             nav += '</div>'
 
-            html = render_page(title, f"Page {i}", canon, page_rows, "", available_categories, nav)
+            html = render_page(title, f"Page {i}", canon, page_rows, "", available_categories, nav, filename=fn)
             with open(os.path.join(OUTPUT_DIR, fn), "w", encoding="utf-8") as f:
                 f.write(html)
 
@@ -362,7 +382,7 @@ def jalankan_export():
         rows = c.fetchall()
         if not rows: continue
         
-        html = render_page(f"{cat.title()} - {SITE_NAME}", f"Latest {cat}", f"{BASE_URL}/{cat}.html", rows, cat, available_categories)
+        html = render_page(f"{cat.title()} - {SITE_NAME}", f"Latest {cat} news", f"{BASE_URL}/{cat}.html", rows, cat, available_categories, filename=f"{cat}.html")
         with open(os.path.join(OUTPUT_DIR, f"{cat}.html"), "w", encoding="utf-8") as f:
             f.write(html)
         print(f"   ✅ {cat}.html ({len(rows)} articles)")
@@ -389,17 +409,17 @@ def jalankan_export():
 # BAGIAN 3: JALANKAN SEMUANYA
 # ==========================================================================
 if __name__ == "__main__":
-    print("="*50)
-    print("MULAI PROSES IMPORT & EXPORT")
-    print("="*50)
+    print("=" * 55)
+    print("MULAI PROSES IMPORT & EXPORT (FILTER 1 JAM)")
+    print("=" * 55)
     
     # 1. Jalankan Scraping
     jalankan_scraping()
     
     # 2. Jalankan Export
-    print("\n" + "="*50)
+    print("\n" + "=" * 55)
     print("MULAI EXPORT HTML")
-    print("="*50)
+    print("=" * 55)
     jalankan_export()
     
     print("\n[PROSES SELESAI]")
