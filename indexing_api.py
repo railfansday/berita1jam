@@ -7,9 +7,16 @@ from google.oauth2 import service_account
 from google.auth.transport.requests import AuthorizedSession
 
 # ==========================================
-# KONFIGURASI
+# KONFIGURASI OTOMATIS
 # ==========================================
-SITEMAP_URL = 'https://railfansday.github.io/spesial4/sitemap.xml'
+# ✅ Mendeteksi otomatis nama repo GitHub Actions (misal: railfansday/berita1jam)
+REPO_FULL_NAME = os.environ.get("GITHUB_REPOSITORY", "railfansday/berita1jam")
+USERNAME = REPO_FULL_NAME.split("/")[0]
+REPO_NAME = REPO_FULL_NAME.split("/")[1]
+
+# ✅ Membuat URL sitemap secara otomatis
+SITEMAP_URL = f"https://{USERNAME}.github.io/{REPO_NAME}/sitemap.xml"
+
 SCOPES = ['https://www.googleapis.com/auth/indexing']
 ENDPOINT = 'https://indexing.googleapis.com/v3/urlNotifications:publish'
 
