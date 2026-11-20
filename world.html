@@ -33,6 +33,439 @@ footer{text-align:center;color:#64748b;font-size:14px;padding:30px 0;border-top:
 <header><h1>News Portal Indonesia</h1></header>
 <nav><a href="index.html">🏠 All News</a><a href="technology.html">📰 Technology</a><a href="business.html">📰 Business</a><a href="sports.html">📰 Sports</a><a href="entertainment.html">📰 Entertainment</a><a href="health.html">📰 Health</a><a href="science.html">📰 Science</a><a href="politics.html">📰 Politics</a><a href="world.html" class="active">📰 World</a><a href="travel.html">📰 Travel</a><a href="food.html">📰 Food</a><a href="automotive.html">📰 Automotive</a><a href="education.html">📰 Education</a><a href="lifestyle.html">📰 Lifestyle</a><a href="other.html">📰 Other</a></nav>
 <h1 style="color:#1e293b;border-left:5px solid #2563eb;padding-left:15px;margin-bottom:30px;">World - News Portal Indonesia</h1>
+<article class="article-card" id="artikel-7782">
+    <script type="application/ld+json">{"@context": "https://schema.org", "@type": "NewsArticle", "headline": "Distributed LLM Training Across Metros: Streaming DiLoCo in MaxText", "image": ["https://storage.googleapis.com/gweb-developer-goog-blog-assets/images/Dilco_header.2e16d0ba.fill-1200x600.jpg"], "datePublished": "2026-11-20T01:05:43.033244", "dateModified": "2026-11-20T01:05:43.033244", "mainEntityOfPage": "https://railfansday.github.io/berita1jam/world.html#artikel-7782"}</script>
+    <h2>Distributed LLM Training Across Metros: Streaming DiLoCo in MaxText</h2>
+    <div class="article-meta">
+        📅 Nov 20, 2026 &nbsp;|&nbsp; Category: <strong>World</strong> &nbsp;|&nbsp; 
+        <a href="https://developers.googleblog.com/distributed-llm-training-across-metros-streaming-diloco-in-maxtext/" target="_blank" rel="nofollow">Read Source &rarr;</a>
+    </div>
+    <div class="article-body">
+        <img src="https://storage.googleapis.com/gweb-developer-goog-blog-assets/images/Dilco_header.2e16d0ba.fill-1200x600.jpg" alt="Distributed LLM Training Across Metros: Streaming DiLoCo in MaxText" loading="lazy">
+        
+            <div style="text-align:center; margin-bottom:20px;"><img src="https://storage.googleapis.com/gweb-developer-goog-blog-assets/images/Dilco_header.2e16d0ba.fill-1200x600.jpg" alt="Distributed LLM Training Across Metros: Streaming DiLoCo in MaxText" style="max-width:100%; height:auto; border-radius:8px;" loading="lazy"></div>
+            
+<div style="text-align:center; margin:20px 0;">
+    <script type="text/javascript">
+        atOptions = {'key' : 'f9e40eb3b3cd05f1038aac7b36b33ad2','format' : 'iframe','height' : 90,'width' : 728,'params' : {}};
+    </script>
+    <script type="text/javascript" src="https://upholdbrilliancerecast.com/f9e40eb3b3cd05f1038aac7b36b33ad2/invoke.js"></script>
+</div>
+
+            <div class="article-body" style="font-size: 16px; line-height: 1.8; color: #333;">
+                <p>Traditionally, training state-of-the-art Large Language Models (LLMs) relies on a monolithic cluster of accelerators, where all devices are collocated and tightly coupled via high-bandwidth to constantly synchronize gradients. However, physical and cost constraints make scaling a single slice increasingly difficult.</p>
+<p>To scale further, we can connect multiple compute slices across geographically distributed datacenters. However, when training across multiple datacenters over wide-area networks (WAN), standard data-parallel training suffers from severe network stalls because slow WAN transfers cannot be fully overlapped with computation.</p>
+<p>To address this, the Google DeepMind and Google Research teams developed DiLoCo (Distributed Low-Communication), a distributed optimization algorithm designed to make training resilient to these low-bandwidth, high-latency connections. In this blog post, we discuss the core concepts of DiLoCo, how it is implemented in MaxText (Google's open-source JAX-based LLM training framework), and the performance benefits it brings to large-scale LLM training on Google Cloud.</p>
+<p>DiLoCo was introduced by Google DeepMind in the paper DiLoCo: Distributed Low-Communication Training of Language Models. Instead of synchronizing gradients across all devices at every single training step (as in standard Data Parallelism), DiLoCo partitions training across M independent compute groups, referred to as learners, and allows each learner to perform many local optimization steps independently before communicating across groups.</p>
+<p>Despite communicating significantly less frequently (by a factor of H, e.g., 1-2 orders of magnitude less) than standard synchronous training, DiLoCo has been shown to achieve comparable convergence and model quality.</p>
+<p>The Vanilla DiLoCo described above reduces total communication volume by a factor of H, however, all learners still transmit their weight deltas for the entire model all at once at every H-th step. On a thin network pipe, that full-model transfer creates a large periodic stall every H steps. This issue is alleviated by Streaming DiLoCo, which is described in the next section.</p>
+<p>In multi-slice training, communication within a single slice is handled by high-speed Inter-Chip Interconnects (ICI). When scaling to multiple slices, synchronization across slices must traverse the Data Center Network (DCN) or, if the slices are geographically distributed, wide-area networks (WAN).</p>
+<p>Within a single datacenter, DCN bandwidth is high enough that JAX and XLA can often hide standard Data Parallel all-reduce collectives by overlapping gradient communication with backward-pass computation. Across datacenters or congested links, however, bandwidth drops and latency rises sharply. Standard DP stalls at every step waiting for global gradient synchronization, collapsing Model FLOPS Utilization (MFU).</p>
+<p>Streaming DiLoCo eliminates this synchronization stall by partitioning the model's parameters into P disjoint fragments. Over the course of H steps, every single fragment in the model is synchronized exactly once, achieving the exact same outer-loop cadence as vanilla DiLoCo without spiky bandwidth utilization.</p>
+<p>Using a roofline model (similar to the JAX Scaling Book), we can calculate the network bandwidth required to prevent communication stalls for a model with ∣Θ∣ parameters (at b bytes per parameter, e.g., b=2 for bfloat16) and per-step compute time tstep=tfwd+tbwd. For example, the standard Data Parallel algorithm transfers 2∣Θ∣b bytes per sync via an all-reduce collective, which is a distributed reduce-scatter where each node reduces a different part, followed by an all-gather so all participants receive all parts. To achieve zero communication stalls, we overlap the reduce-scatter of the gradients with the backward pass, which produces them and takes tbwd time. Therefore, the peak required bandwidth is Bdp ≈ 2∣Θ∣b / tbwd.</p>
+<p>Worked Example (Qwen3-32B in bfloat16, tstep​≈6.2s, P=H=65):</p>
+<p>To evaluate distributed efficiency under realistic network bottlenecks, we benchmarked Qwen3-32B (64 decoder layers, partitioned into P = 65 fragments with H = 65) across 2× TPU v5p-32 slices (dcn_diloco_parallelism=2) using built-in Linux traffic-control (tc) bandwidth shaping to limit inter-slice bandwidth across three network regimes: Unthrottled (Line Rate), 30 Gbit/s aggregate (Moderate Congestion), and 10 Gbit/s aggregate (Severe Congestion).</p>
+<p>A common question with low-communication training is whether allowing learners to train independently between synchronizations degrades model quality—especially on Mixture-of-Experts (MoE) architectures, where independent updates could cause expert routers to drift apart.</p>
+<p>We evaluated Streaming DiLoCo against synchronous Data Parallel pre-training across two MoE architectures in MaxText (Qwen3-30B-A3B and Gemma4-26B-A4B) over 4,000 training steps:</p>
+<p>Empirical results confirm that Streaming DiLoCo preserves—and even slightly improves—validation loss:</p>
+<p>MaxText provides a native JAX and Flax NNX implementation of both Vanilla and Streaming DiLoCo—requiring no external central parameter servers.</p>
+<p>You can enable Streaming DiLoCo in your MaxText YAML configuration or CLI overrides by setting enable_diloco: true and enable_streaming_diloco: true. As a best practice, set both num_diloco_fragments (P) and diloco_sync_period (H) to N_layers + 1 so that exactly one fragment is synchronized per training step (Δh = 1):</p>
+<p>In MaxText, diloco.py splits each global batch across the M learners so each learner processes GBS / M tokens per step. To overlap cross-slice communication with TPU computation in Streaming DiLoCo, weight deltas for the scheduled fragment are offloaded to M-way sharded syncer workers running on the learner host CPUs. Rather than routing through a single central coordinator, the host-CPU syncer shards execute a distributed all-reduce across the network in the background to average the fragment deltas while the TPUs continue running inner-loop training steps. Each syncer shard then applies the outer Nesterov momentum update locally and writes the updated fragment weights back to its colocated TPU learner. To dive deeper or launch your first run:</p>
+<p>Streaming DiLoCo in MaxText decouples large-scale LLM pre-training from the requirement of a single, monolithic, high-bandwidth fabric. By combining use of an inner and outer optimizer with fine-grained parameter streaming, engineering teams can pool TPU slices across congested datacenter networks or geographically distributed metros—sustaining high hardware utilization without compromising model convergence. Streaming DiLoCo is available today in MaxText v0.2.5 on PyPI, the corresponding Docker images and on GitHub main. Try it today for experimenting with distributed training workloads.</p>
+<p>Multi-Turn Agentic Reinforcement Learning with Tunix and Gemma 4 on Google TPUs</p>
+<p>Unlocking Stable On-Policy RL on TPU with Bitwise-Zero Train–Inference Mismatch</p>
+<p>Gemini 4 Hydrogen: a faster model for general purpose robotics</p>
+<p>Securing Your Agents: A Hands-On Guide to Agent Anomaly Detection</p>
+                <p style="margin-top: 25px;">
+                    <a href="https://developers.googleblog.com/distributed-llm-training-across-metros-streaming-diloco-in-maxtext/" target="_blank" rel="nofollow noopener" style="color: #0d6efd; text-decoration: none; font-weight: bold;">
+                        &rarr; Baca artikel asli
+                    </a>
+                </p>
+            </div>
+            
+<div style="text-align:center; margin:20px 0;">
+    <script type="text/javascript">
+        atOptions = {'key' : 'f9e40eb3b3cd05f1038aac7b36b33ad2','format' : 'iframe','height' : 90,'width' : 728,'params' : {}};
+    </script>
+    <script type="text/javascript" src="https://upholdbrilliancerecast.com/f9e40eb3b3cd05f1038aac7b36b33ad2/invoke.js"></script>
+</div>
+
+            
+        
+<div style="text-align:center; margin:20px 0;">
+    <script type="text/javascript">
+        atOptions = {'key' : 'f9e40eb3b3cd05f1038aac7b36b33ad2','format' : 'iframe','height' : 90,'width' : 728,'params' : {}};
+    </script>
+    <script type="text/javascript" src="https://upholdbrilliancerecast.com/f9e40eb3b3cd05f1038aac7b36b33ad2/invoke.js"></script>
+</div>
+
+    </div>
+</article>
+<article class="article-card" id="artikel-7707">
+    <script type="application/ld+json">{"@context": "https://schema.org", "@type": "NewsArticle", "headline": "Superman's Fascinating New Weakness Is His Best Since Kryptonite", "image": ["https://static0.srcdn.com/wordpress/wp-content/uploads/2026/11/superman-hurt-in-2025-film.jpg?w=1600&h=900&fit=crop"], "datePublished": "2026-11-20T01:00:18Z", "dateModified": "2026-11-20T01:00:18Z", "mainEntityOfPage": "https://railfansday.github.io/berita1jam/world.html#artikel-7707"}</script>
+    <h2>Superman&#x27;s Fascinating New Weakness Is His Best Since Kryptonite</h2>
+    <div class="article-meta">
+        📅 Nov 20, 2026 &nbsp;|&nbsp; Category: <strong>World</strong> &nbsp;|&nbsp; 
+        <a href="https://screenrant.com/superman-new-weakness-scarlet-jungle/" target="_blank" rel="nofollow">Read Source &rarr;</a>
+    </div>
+    <div class="article-body">
+        <img src="https://static0.srcdn.com/wordpress/wp-content/uploads/2026/11/superman-hurt-in-2025-film.jpg?w=1600&amp;h=900&amp;fit=crop" alt="Superman&#x27;s Fascinating New Weakness Is His Best Since Kryptonite" loading="lazy">
+        
+            <div style="text-align:center; margin-bottom:20px;"><img src="https://static0.srcdn.com/wordpress/wp-content/uploads/2026/11/superman-hurt-in-2025-film.jpg?w=1600&h=900&fit=crop" alt="Superman's Fascinating New Weakness Is His Best Since Kryptonite" style="max-width:100%; height:auto; border-radius:8px;" loading="lazy"></div>
+            
+<div style="text-align:center; margin:20px 0;">
+    <script type="text/javascript">
+        atOptions = {'key' : 'f9e40eb3b3cd05f1038aac7b36b33ad2','format' : 'iframe','height' : 90,'width' : 728,'params' : {}};
+    </script>
+    <script type="text/javascript" src="https://upholdbrilliancerecast.com/f9e40eb3b3cd05f1038aac7b36b33ad2/invoke.js"></script>
+</div>
+
+            <div class="article-body" style="font-size: 16px; line-height: 1.8; color: #333;">
+                <p>One of the biggest hurdles in creating a thrilling challenge for Superman to overcome is playing into his usual weaknesses, whether physiological or emotional. Kryptonite is a familiar solution, if extremely predictable, and magic is increasingly well-understood as something he can't reasonably resist. But adapting cleverly to his Kryptonian advantages is always a treat to see, especially when it's done by villains normally seen as trivial against one of DC's mightiest protectors. Batman/Superman: World's Finest plays into this nicely thanks to writer Mark Waid, illustrator Adrián Gutiérrez, and crucially for the colors in this instance, Luis Guerrero.</p>
+<p>In the current ongoing storyline, Extinction Event, Ra's al Ghul has assembled a group of villains as part of an ecoterrorist plot, dubbing them the Four Harbingers of the Apocalypse. The core group threatening the world this time features Queen Bee (Plague), Poison Ivy (Famine), Ocean Master (War), and Tokamak (Death), against whom stand Batman and Superman, and whatever allies they can muster. Despite each of these villains, including Tokamak, being seen by Batman as "jobbers" against Superman, several have provided deadly ways to level the playing field, with one being particularly striking, and effective, in the latest issue.</p>
+<p>With one so strongly connected to the Green, Poison Ivy's ability to create a tailored weakness to subdue Superman shouldn't be too surprising, as it's been discussed before. But in Batman/Superman: World's Finest #57, Ivy's able to completely trap Superman by unleashing a trap of hers, a network of plants genetically originating from Krypton's Scarlet Jungle. With her Famine assault already originating in Kansas, with Talia al Ghul even saying Ivy shouldn't be a threat against Superman, this appears to be part of her plan, taking advantage of the area's rich, fertile soil to spread her attack worldwide, with her final touch being the unsettlingly red vines around her.</p>
+<p>Superman's most brilliant long-running adversary is moving up not just in power levels, but dark ambitions for the multiverse and all known futures.</p>
+<p>It's clear that these vines stand as more than a counter against Superman, with Kryptonian resilience and strength enough to shred through the remote-controlled Batplane like tissue paper. What's worse is, even as Superman seemingly stops Ivy herself, her team is revealed to be just the prelude to Ra's bigger plan, while Ivy's vines completely entrap Superman. Realizing he should have been tipped off by their intense colors, Superman realizes they're plants from his homeworld, likely similarly empowered by Earth's Yellow Sun. It seems Superman just confirmed a new weakness, or at least a sub-bullet point to how other Kryptonian lifeforms can threaten him.</p>
+<p>Part of the fun of this particular story has been in exploring just how villains on smaller scopes can handle a god-tier hero like Superman. Henry Hewitt, aka Tokamak, was seen slowing Superman down, with Superman even noting that his opponent's living nuclear reactor powers allow him to give off intense, "Red-Sunnish" radiation. It's not enough to entirely shut him down, but Superman is slowed just enough for Tokamak to attempt to spread greater nuclear ruin at vulnerable sectors. The same can be said about how Batman cautions his friend against fighting Ocean Master, for fear of Superman falling victim to Atlantean Sorcery. The Scarlet Jungle was already inhospitable on Krypton, so to have its flora suddenly supercharged like Superman is a fearsome thought.</p>
+<p>But just as Superman deals with Tokamak and helps stop Orm's assault, with the surprising help of the Flash's Rogues Gallery, the latest development signals something far more sinister ahead. Ra's has set off the chain reaction he wanted, as he wants to set off a "future doom" for Earth, believing it to be a better solution to address humankind's environmental abuse. In the next step of this new story, named "Ra's Triumphant", this latest tailored method to contain Superman must be dealt with, as he and Batman wrestle with conflicting viewpoints on how the world's handling climate-based catastrophe, all while one villain seems hell-bent on ending it all himself.</p>
+<p>We want to hear from you. Share your perspective in the comments below, and please keep the conversation respectful.</p>
+<p>The best of ScreenRant, directly in your inbox.</p>
+                <p style="margin-top: 25px;">
+                    <a href="https://screenrant.com/superman-new-weakness-scarlet-jungle/" target="_blank" rel="nofollow noopener" style="color: #0d6efd; text-decoration: none; font-weight: bold;">
+                        &rarr; Baca artikel asli
+                    </a>
+                </p>
+            </div>
+            
+<div style="text-align:center; margin:20px 0;">
+    <script type="text/javascript">
+        atOptions = {'key' : 'f9e40eb3b3cd05f1038aac7b36b33ad2','format' : 'iframe','height' : 90,'width' : 728,'params' : {}};
+    </script>
+    <script type="text/javascript" src="https://upholdbrilliancerecast.com/f9e40eb3b3cd05f1038aac7b36b33ad2/invoke.js"></script>
+</div>
+
+            
+        
+<div style="text-align:center; margin:20px 0;">
+    <script type="text/javascript">
+        atOptions = {'key' : 'f9e40eb3b3cd05f1038aac7b36b33ad2','format' : 'iframe','height' : 90,'width' : 728,'params' : {}};
+    </script>
+    <script type="text/javascript" src="https://upholdbrilliancerecast.com/f9e40eb3b3cd05f1038aac7b36b33ad2/invoke.js"></script>
+</div>
+
+    </div>
+</article>
+<article class="article-card" id="artikel-7721">
+    <script type="application/ld+json">{"@context": "https://schema.org", "@type": "NewsArticle", "headline": "Climate communication that resonates must be based on empathy", "image": [], "datePublished": "2026-11-20T01:00:01", "dateModified": "2026-11-20T01:00:01", "mainEntityOfPage": "https://railfansday.github.io/berita1jam/world.html#artikel-7721"}</script>
+    <h2>Climate communication that resonates must be based on empathy</h2>
+    <div class="article-meta">
+        📅 Nov 20, 2026 &nbsp;|&nbsp; Category: <strong>World</strong> &nbsp;|&nbsp; 
+        <a href="https://phys.org/news/2026-11-climate-communication-resonates-based-empathy.html" target="_blank" rel="nofollow">Read Source &rarr;</a>
+    </div>
+    <div class="article-body">
+        
+        
+            
+            
+<div style="text-align:center; margin:20px 0;">
+    <script type="text/javascript">
+        atOptions = {'key' : 'f9e40eb3b3cd05f1038aac7b36b33ad2','format' : 'iframe','height' : 90,'width' : 728,'params' : {}};
+    </script>
+    <script type="text/javascript" src="https://upholdbrilliancerecast.com/f9e40eb3b3cd05f1038aac7b36b33ad2/invoke.js"></script>
+</div>
+
+            <div class="article-body" style="font-size: 16px; line-height: 1.8; color: #333;">
+                <p>Climate change is a global reality, but people often encounter it through different local realities. For some, it enters everyday life through social media feeds, news reports, scientific findings and public discussion. For others, it is through water scarcity, food insecurity, floods, heat waves, wildfires or the loss of a home or a loved one.</p>
+                <p style="margin-top: 25px;">
+                    <a href="https://phys.org/news/2026-11-climate-communication-resonates-based-empathy.html" target="_blank" rel="nofollow noopener" style="color: #0d6efd; text-decoration: none; font-weight: bold;">
+                        &rarr; Baca artikel asli
+                    </a>
+                </p>
+            </div>
+            
+<div style="text-align:center; margin:20px 0;">
+    <script type="text/javascript">
+        atOptions = {'key' : 'f9e40eb3b3cd05f1038aac7b36b33ad2','format' : 'iframe','height' : 90,'width' : 728,'params' : {}};
+    </script>
+    <script type="text/javascript" src="https://upholdbrilliancerecast.com/f9e40eb3b3cd05f1038aac7b36b33ad2/invoke.js"></script>
+</div>
+
+            
+        
+<div style="text-align:center; margin:20px 0;">
+    <script type="text/javascript">
+        atOptions = {'key' : 'f9e40eb3b3cd05f1038aac7b36b33ad2','format' : 'iframe','height' : 90,'width' : 728,'params' : {}};
+    </script>
+    <script type="text/javascript" src="https://upholdbrilliancerecast.com/f9e40eb3b3cd05f1038aac7b36b33ad2/invoke.js"></script>
+</div>
+
+    </div>
+</article>
+<article class="article-card" id="artikel-7740">
+    <script type="application/ld+json">{"@context": "https://schema.org", "@type": "NewsArticle", "headline": "It's Not 'Car Mechanic Simulator,' But GTA 6 Is Leaning Harder Into Vehicle Repair Than Before", "image": ["https://www.jalopnik.com/img/gallery/its-not-car-mechanic-simulator-but-gta-6-is-leaning-harder-into-vehicle-repair-than-before/l-intro-1795135080.jpg"], "datePublished": "2026-11-20T00:46:33+00:00", "dateModified": "2026-11-20T00:46:33+00:00", "mainEntityOfPage": "https://railfansday.github.io/berita1jam/world.html#artikel-7740"}</script>
+    <h2>It&#x27;s Not &#x27;Car Mechanic Simulator,&#x27; But GTA 6 Is Leaning Harder Into Vehicle Repair Than Before</h2>
+    <div class="article-meta">
+        📅 Nov 20, 2026 &nbsp;|&nbsp; Category: <strong>World</strong> &nbsp;|&nbsp; 
+        <a href="https://www.jalopnik.com/2322595/gta-6-grand-theft-auto-car-mechanic-simulator/" target="_blank" rel="nofollow">Read Source &rarr;</a>
+    </div>
+    <div class="article-body">
+        <img src="https://www.jalopnik.com/img/gallery/its-not-car-mechanic-simulator-but-gta-6-is-leaning-harder-into-vehicle-repair-than-before/l-intro-1795135080.jpg" alt="It&#x27;s Not &#x27;Car Mechanic Simulator,&#x27; But GTA 6 Is Leaning Harder Into Vehicle Repair Than Before" loading="lazy">
+        
+            <div style="text-align:center; margin-bottom:20px;"><img src="https://www.jalopnik.com/img/gallery/its-not-car-mechanic-simulator-but-gta-6-is-leaning-harder-into-vehicle-repair-than-before/l-intro-1795135080.jpg" alt="It's Not 'Car Mechanic Simulator,' But GTA 6 Is Leaning Harder Into Vehicle Repair Than Before" style="max-width:100%; height:auto; border-radius:8px;" loading="lazy"></div>
+            
+<div style="text-align:center; margin:20px 0;">
+    <script type="text/javascript">
+        atOptions = {'key' : 'f9e40eb3b3cd05f1038aac7b36b33ad2','format' : 'iframe','height' : 90,'width' : 728,'params' : {}};
+    </script>
+    <script type="text/javascript" src="https://upholdbrilliancerecast.com/f9e40eb3b3cd05f1038aac7b36b33ad2/invoke.js"></script>
+</div>
+
+            <div class="article-body" style="font-size: 16px; line-height: 1.8; color: #333;">
+                <p>More so than any of its predecessors, "Grand Theft Auto 6" leans heavily into realism. You can't just carry your entire arsenal on you anymore — instead, you must rely on a few guns on your person and a stash in your trunk. Building off that simulated realism, the game now puts a greater emphasis on the exciting world of vehicle maintenance directly into the gameplay. There will be times when you have to get your car repaired, repainted, or refueled. Who knows — maybe "Grand Theft Auto 7" will go one step further by including a mission called "Doing Taxes."</p>
+<p>To be fair to "Grand Theft Auto 6," it does remember that it is an action/adventure game and not the next coming of "Car Mechanic Simulator." For instance, stops to get your car fixed are generally pretty brief. That way, you can get right back to running heists and stealing a car that looks a lot like a Pontiac Trans Am out of a police impound lot.</p>
+<p>Still, the game does feature four different ways to get your car fixed: Pay 'N' Spray shops, mod shops, gas stations, and a guy named Joey who can be called upon to do repairs. Gas stations are limited in the repairs they can do and are more expensive than other repair shops — there's that realism again. For more extensive repairs, you'll need to stop at one of the other shops or call Joey.</p>
+<p>Missions can be pretty rough on your vehicles, especially when you're trying to get away from the cops. Your car can get engine damage or cosmetic damage, and fixing it can be important to the gameplay. One of the early missions, "Just a Scratch," will actually make you take your vehicle into Coastal Auto Care to get fixed. That's where you meet Joey.</p>
+<p>Throughout the game, there is an engine condition indicator that goes from green to orange to red. It ends off at red with an "X" in the middle, indicating that the engine is dead. Green indicates the engine is in good shape, orange means there is moderate damage, and red indicates critical damage. An engine that is not in good shape can affect how the car performs, which is not something you want to deal with as your wanted level increases.</p>
+<p>And don't forget to fuel up, as each car has a working fuel gauge. But don't worry, because you won't have to stop for gas too often; apparently "Grand Theft Auto 6" cars get pretty great gas mileage. EVs are also a part of the universe, which means you'll have to stop for a charge every so often if you grab one.</p>
+<p>The cars in "Grand Theft Auto 6" are not indestructible, but they can keep running even after getting pretty banged up. So, why bother to fix body damage? You don't want the NPCs to point and laugh at your car, do you? Even if you aren't worried about the opinions of Vice City pedestrians, the condition of your car's body can affect gameplay as well. Want to sell that hot car that you just stole? Well, just like in real life, damage to the body of the car can affect how much it sells for.</p>
+<p>Then there's the matter of getting away from the cops after stealing a car. They will often have the car's description, including its color. There are even Flock-like cameras in GTA 6 that can track your movements. Repainting it another color, even when the body is in good shape, can help hide it from the police. It's like a wardrobe change, but for your vehicle. Pay 'N' Spray is the place to go for a quick paint job, while mod shops will be able to make more extensive changes to your car.</p>
+<p>Overall, it seems like Rockstar has found a nice balance between the realities of car ownership and the escapist fantasy that the Grand Theft Auto series has always embodied. We'll just have to wait and see if "Car Mechanic Simulator 2027" will be adding heists.</p>
+                <p style="margin-top: 25px;">
+                    <a href="https://www.jalopnik.com/2322595/gta-6-grand-theft-auto-car-mechanic-simulator/" target="_blank" rel="nofollow noopener" style="color: #0d6efd; text-decoration: none; font-weight: bold;">
+                        &rarr; Baca artikel asli
+                    </a>
+                </p>
+            </div>
+            
+<div style="text-align:center; margin:20px 0;">
+    <script type="text/javascript">
+        atOptions = {'key' : 'f9e40eb3b3cd05f1038aac7b36b33ad2','format' : 'iframe','height' : 90,'width' : 728,'params' : {}};
+    </script>
+    <script type="text/javascript" src="https://upholdbrilliancerecast.com/f9e40eb3b3cd05f1038aac7b36b33ad2/invoke.js"></script>
+</div>
+
+            
+        
+<div style="text-align:center; margin:20px 0;">
+    <script type="text/javascript">
+        atOptions = {'key' : 'f9e40eb3b3cd05f1038aac7b36b33ad2','format' : 'iframe','height' : 90,'width' : 728,'params' : {}};
+    </script>
+    <script type="text/javascript" src="https://upholdbrilliancerecast.com/f9e40eb3b3cd05f1038aac7b36b33ad2/invoke.js"></script>
+</div>
+
+    </div>
+</article>
+<article class="article-card" id="artikel-7699">
+    <script type="application/ld+json">{"@context": "https://schema.org", "@type": "NewsArticle", "headline": "Bruno Mars Mourns His Father’s Death: ‘The Man That Taught Me Everything I Know’", "image": ["https://www.rollingstone.com/wp-content/uploads/2026/11/bruno-mars-father-death.jpg?w=1600&h=900&crop=1"], "datePublished": "2026-11-20T00:44:22+00:00", "dateModified": "2026-11-20T00:44:22+00:00", "mainEntityOfPage": "https://railfansday.github.io/berita1jam/world.html#artikel-7699"}</script>
+    <h2>Bruno Mars Mourns His Father’s Death: ‘The Man That Taught Me Everything I Know’</h2>
+    <div class="article-meta">
+        📅 Nov 20, 2026 &nbsp;|&nbsp; Category: <strong>World</strong> &nbsp;|&nbsp; 
+        <a href="https://www.rollingstone.com/music/music-news/bruno-mars-mourns-father-death-peter-hernandez-1235661510/" target="_blank" rel="nofollow">Read Source &rarr;</a>
+    </div>
+    <div class="article-body">
+        <img src="https://www.rollingstone.com/wp-content/uploads/2026/11/bruno-mars-father-death.jpg?w=1600&amp;h=900&amp;crop=1" alt="Bruno Mars Mourns His Father’s Death: ‘The Man That Taught Me Everything I Know’" loading="lazy">
+        
+            <div style="text-align:center; margin-bottom:20px;"><img src="https://www.rollingstone.com/wp-content/uploads/2026/11/bruno-mars-father-death.jpg?w=1600&h=900&crop=1" alt="Bruno Mars Mourns His Father’s Death: ‘The Man That Taught Me Everything I Know’" style="max-width:100%; height:auto; border-radius:8px;" loading="lazy"></div>
+            
+<div style="text-align:center; margin:20px 0;">
+    <script type="text/javascript">
+        atOptions = {'key' : 'f9e40eb3b3cd05f1038aac7b36b33ad2','format' : 'iframe','height' : 90,'width' : 728,'params' : {}};
+    </script>
+    <script type="text/javascript" src="https://upholdbrilliancerecast.com/f9e40eb3b3cd05f1038aac7b36b33ad2/invoke.js"></script>
+</div>
+
+            <div class="article-body" style="font-size: 16px; line-height: 1.8; color: #333;">
+                <p>Throughout his prolific and wildly successful career, Bruno Mars has always made sure to credit his parents and upbringing for his success today, highlighting how watching his father, Peter “Dr. Doo-Wop” Hernandez, as a kid would impact his signature style as he rose to fame. “My whole sense of rhythm is because my dad was teaching me bongos as a kid,” Mars told Latina magazine in 2017, per Remezcla. “He’s an old-school working musician, so that’s where the pinky rings come from, the patent-leather shoes, the suits, and the pompadour. It all stems from watching my father.”</p>
+<p>On Thursday, Mars shared the devastating news that his father had died. In a social media post, Mars included photos of his father hugging him from a hospital bed and images taken over the course of his lifetime, ending with a snapshot of his father and mother, Bernadette Hernandez, who died from a brain aneurysm in 2013. In the caption, Mars wrote, “Last week I got to hug my father one last time. If you’ve ever seen me talk about him I’ve always said that he’s the man that taught me everything I know, especially when it comes to music.”</p>
+<p>Mars continued, “He raised my four beautiful sisters, my brother, and me. In my eyes he was the greatest dad in the world, and I will miss him everyday until we meet again. I Love you Pops. Kiss mom up there for me.”</p>
+<p>When speaking to Rolling Stone in 2013, Peter recalled dimming the lights in the delivery room as his wife gave birth to Mars. He described the setting as “almost like a nightclub,” and said he played “oldies but goodies” on a cassette boombox to usher Mars into the world.
+
+
+
+
+
+	
+		Trending Stories
+	
+	
+
+
+
+
+
+
+	
+	
+		
+					John Mayer Transports Michael J. Fox Back to the Future With Chuck Berry Performance		
+	
+
+
+
+
+
+
+
+
+
+	
+	
+		
+					CMA Awards 2026: The Complete Winners List		
+	
+
+
+
+
+
+
+
+
+
+	
+	
+		
+					Halestorm, Brothers Osborne, Hardy Sing for Brooks & Dunn at Ferocious 2026 CMA Tribute		
+	
+
+
+
+
+
+
+
+
+
+	
+	
+		
+					Marlon Jackson Reveals Stage 4 Prostate Cancer Diagnosis</p>
+<p>Mars often discussed how he grew up surrounded by music as a kid, playing at gigs alongside his father, mother, and siblings. Peter was a percussionist from Brooklyn who packed his congas and headed to Hawaii in the Seventies. While playing drums at the Hilton in Waikiki, he met Mars’ mom, Bernadette, a hula dancer and singer who’d moved from the Philippines with her family at a young age. When Mars arrived a few years later, his father had already shaped the family for the stage. While his father led the band, his mother sang with some of his uncles; and his older sister and brother also performed. Mars, as many know by now, impersonated Elvis as a child and at four years old, he appeared as a tiny King in Honeymoon in Vegas.</p>
+<p>“This is something I never thought about until recently,” Mars said in a 2013 Rolling Stone interview. “But because of my upbringing performing for tourists, I had to entertain everyone. Not just black people, not just white people, not just Asian people, not just Latin people. I had to perform for anybody that came to Hawaii.”</p>
+<p>We want to hear it. Send us a tip using our anonymous form.</p>
+                <p style="margin-top: 25px;">
+                    <a href="https://www.rollingstone.com/music/music-news/bruno-mars-mourns-father-death-peter-hernandez-1235661510/" target="_blank" rel="nofollow noopener" style="color: #0d6efd; text-decoration: none; font-weight: bold;">
+                        &rarr; Baca artikel asli
+                    </a>
+                </p>
+            </div>
+            
+<div style="text-align:center; margin:20px 0;">
+    <script type="text/javascript">
+        atOptions = {'key' : 'f9e40eb3b3cd05f1038aac7b36b33ad2','format' : 'iframe','height' : 90,'width' : 728,'params' : {}};
+    </script>
+    <script type="text/javascript" src="https://upholdbrilliancerecast.com/f9e40eb3b3cd05f1038aac7b36b33ad2/invoke.js"></script>
+</div>
+
+            
+        
+<div style="text-align:center; margin:20px 0;">
+    <script type="text/javascript">
+        atOptions = {'key' : 'f9e40eb3b3cd05f1038aac7b36b33ad2','format' : 'iframe','height' : 90,'width' : 728,'params' : {}};
+    </script>
+    <script type="text/javascript" src="https://upholdbrilliancerecast.com/f9e40eb3b3cd05f1038aac7b36b33ad2/invoke.js"></script>
+</div>
+
+    </div>
+</article>
+<article class="article-card" id="artikel-7722">
+    <script type="application/ld+json">{"@context": "https://schema.org", "@type": "NewsArticle", "headline": "NEPTUNE poised to replace Navy's global weather model, improving forecasts over open ocean", "image": [], "datePublished": "2026-11-20T00:40:07", "dateModified": "2026-11-20T00:40:07", "mainEntityOfPage": "https://railfansday.github.io/berita1jam/world.html#artikel-7722"}</script>
+    <h2>NEPTUNE poised to replace Navy&#x27;s global weather model, improving forecasts over open ocean</h2>
+    <div class="article-meta">
+        📅 Nov 20, 2026 &nbsp;|&nbsp; Category: <strong>World</strong> &nbsp;|&nbsp; 
+        <a href="https://phys.org/news/2026-11-neptune-poised-navy-global-weather.html" target="_blank" rel="nofollow">Read Source &rarr;</a>
+    </div>
+    <div class="article-body">
+        
+        
+            
+            
+<div style="text-align:center; margin:20px 0;">
+    <script type="text/javascript">
+        atOptions = {'key' : 'f9e40eb3b3cd05f1038aac7b36b33ad2','format' : 'iframe','height' : 90,'width' : 728,'params' : {}};
+    </script>
+    <script type="text/javascript" src="https://upholdbrilliancerecast.com/f9e40eb3b3cd05f1038aac7b36b33ad2/invoke.js"></script>
+</div>
+
+            <div class="article-body" style="font-size: 16px; line-height: 1.8; color: #333;">
+                <p>The U.S. Naval Research Laboratory-developed Navy Environmental Prediction sysTem Utilizing a Nonhydrostatic Engine, known as NEPTUNE, is poised to become an operational Navy weather prediction capability, providing improved environmental forecasts to support naval operations around the globe.</p>
+                <p style="margin-top: 25px;">
+                    <a href="https://phys.org/news/2026-11-neptune-poised-navy-global-weather.html" target="_blank" rel="nofollow noopener" style="color: #0d6efd; text-decoration: none; font-weight: bold;">
+                        &rarr; Baca artikel asli
+                    </a>
+                </p>
+            </div>
+            
+<div style="text-align:center; margin:20px 0;">
+    <script type="text/javascript">
+        atOptions = {'key' : 'f9e40eb3b3cd05f1038aac7b36b33ad2','format' : 'iframe','height' : 90,'width' : 728,'params' : {}};
+    </script>
+    <script type="text/javascript" src="https://upholdbrilliancerecast.com/f9e40eb3b3cd05f1038aac7b36b33ad2/invoke.js"></script>
+</div>
+
+            
+        
+<div style="text-align:center; margin:20px 0;">
+    <script type="text/javascript">
+        atOptions = {'key' : 'f9e40eb3b3cd05f1038aac7b36b33ad2','format' : 'iframe','height' : 90,'width' : 728,'params' : {}};
+    </script>
+    <script type="text/javascript" src="https://upholdbrilliancerecast.com/f9e40eb3b3cd05f1038aac7b36b33ad2/invoke.js"></script>
+</div>
+
+    </div>
+</article>
+<article class="article-card" id="artikel-7773">
+    <script type="application/ld+json">{"@context": "https://schema.org", "@type": "NewsArticle", "headline": "Add This Crunchy Ingredient To Ground Beef For Lighter Steakhouse Burgers (Hint: It's Not Breadcrumbs)", "image": ["https://www.foodrepublic.com/img/gallery/add-this-crunchy-ingredient-to-ground-beef-for-lighter-steakhouse-burgers-hint-its-not-breadcrumbs/l-intro-1795124164.jpg"], "datePublished": "2026-11-20T00:17:00+00:00", "dateModified": "2026-11-20T00:17:00+00:00", "mainEntityOfPage": "https://railfansday.github.io/berita1jam/world.html#artikel-7773"}</script>
+    <h2>Add This Crunchy Ingredient To Ground Beef For Lighter Steakhouse Burgers (Hint: It&#x27;s Not Breadcrumbs)</h2>
+    <div class="article-meta">
+        📅 Nov 20, 2026 &nbsp;|&nbsp; Category: <strong>World</strong> &nbsp;|&nbsp; 
+        <a href="https://www.foodrepublic.com/2322461/add-crunchy-ingredient-ground-beef-lighter-steakhouse-burgers-not-breadcrumbs/" target="_blank" rel="nofollow">Read Source &rarr;</a>
+    </div>
+    <div class="article-body">
+        <img src="https://www.foodrepublic.com/img/gallery/add-this-crunchy-ingredient-to-ground-beef-for-lighter-steakhouse-burgers-hint-its-not-breadcrumbs/l-intro-1795124164.jpg" alt="Add This Crunchy Ingredient To Ground Beef For Lighter Steakhouse Burgers (Hint: It&#x27;s Not Breadcrumbs)" loading="lazy">
+        
+            <div style="text-align:center; margin-bottom:20px;"><img src="https://www.foodrepublic.com/img/gallery/add-this-crunchy-ingredient-to-ground-beef-for-lighter-steakhouse-burgers-hint-its-not-breadcrumbs/l-intro-1795124164.jpg" alt="Add This Crunchy Ingredient To Ground Beef For Lighter Steakhouse Burgers (Hint: It's Not Breadcrumbs)" style="max-width:100%; height:auto; border-radius:8px;" loading="lazy"></div>
+            
+<div style="text-align:center; margin:20px 0;">
+    <script type="text/javascript">
+        atOptions = {'key' : 'f9e40eb3b3cd05f1038aac7b36b33ad2','format' : 'iframe','height' : 90,'width' : 728,'params' : {}};
+    </script>
+    <script type="text/javascript" src="https://upholdbrilliancerecast.com/f9e40eb3b3cd05f1038aac7b36b33ad2/invoke.js"></script>
+</div>
+
+            <div class="article-body" style="font-size: 16px; line-height: 1.8; color: #333;">
+                <p>We may receive a commission on purchases made from links.</p>
+<p>The actual difference between a hamburger and a steakburger comes down to the quality of meat used in the grind, but the difference between a homemade steakburger and one from a steakhouse is all about a lighter texture. Melissa Clark, author of "The Big Book of Dinner: Recipes and Rules (and How to Break Them)," tells us that achieving that characteristic is quite easy if you use ground cracker crumbs.</p>
+<p>"Any kind of cracker or breadcrumbs will make a burger lighter," Clark says. "Ritz and saltines work really well. They are very airy, which helps lighten the ground meat." Beef is rather dense, even if you avoid overworking it into a firm, puck-like consistency that's more similar to sausage than a tender patty. But a quarter cup of ground crackers per pound of meat can make a world of difference.</p>
+<p>When meat cooks, it contracts and releases juice and fat. Crackers, however, absorb them rather than allowing them to seep out of the patty, preventing it from shriveling up too much. Since steakhouse burgers typically use thick patties, this also keeps them nice and moist. Whereas a thin sliver of well-crusted beef may be just what you want in a smashburger, retaining moisture is a vital component to keeping your steakhouse burgers not only light, but also at their peak flavor.</p>
+<p>Using plain, unsalted crackers can still keep your steakhouse burgers light, but it would be a missed opportunity for better flavor. While you also don't want to use something starch-free, like a nut- or seed-based variety, Melissa Clark is a big believer in picking a tasty brand and smashing them up properly.</p>
+<p>"Using crackers can add great flavor – Ritz, with their butteriness, are especially lovely," Clark explains. Flavorful but unobtrusive, Ritz crackers are the perfect addition to any savory dish because just about everything can benefit from their toasty richness. But if you want to get a bit experimental, you can also just as easily use Cheez-Its or anything seasoned. This is an easy way to avoid coming up with a specialty spice blend since you'll be adding enough to thoroughly flavor your meat.</p>
+<p>Clark is also a proponent of using whatever method you can to grind the crackers into a fine powder. "Grind the crackers in a food processor, blender or tuck them in a plastic bag and crush them under a rolling pin," she added. Large chunks can make some bites unexpectedly soggy and, if using a seasoned cracker, a little too flavorful. Plus, if some parts of your blend don't have a starch, they may end up expressing their juices too much, leaving some bites juicy and light and others dense and dry.</p>
+                <p style="margin-top: 25px;">
+                    <a href="https://www.foodrepublic.com/2322461/add-crunchy-ingredient-ground-beef-lighter-steakhouse-burgers-not-breadcrumbs/" target="_blank" rel="nofollow noopener" style="color: #0d6efd; text-decoration: none; font-weight: bold;">
+                        &rarr; Baca artikel asli
+                    </a>
+                </p>
+            </div>
+            
+<div style="text-align:center; margin:20px 0;">
+    <script type="text/javascript">
+        atOptions = {'key' : 'f9e40eb3b3cd05f1038aac7b36b33ad2','format' : 'iframe','height' : 90,'width' : 728,'params' : {}};
+    </script>
+    <script type="text/javascript" src="https://upholdbrilliancerecast.com/f9e40eb3b3cd05f1038aac7b36b33ad2/invoke.js"></script>
+</div>
+
+            
+        
+<div style="text-align:center; margin:20px 0;">
+    <script type="text/javascript">
+        atOptions = {'key' : 'f9e40eb3b3cd05f1038aac7b36b33ad2','format' : 'iframe','height' : 90,'width' : 728,'params' : {}};
+    </script>
+    <script type="text/javascript" src="https://upholdbrilliancerecast.com/f9e40eb3b3cd05f1038aac7b36b33ad2/invoke.js"></script>
+</div>
+
+    </div>
+</article>
 <article class="article-card" id="artikel-7464">
     <script type="application/ld+json">{"@context": "https://schema.org", "@type": "NewsArticle", "headline": "Here’s the precise moment when cyberattacks started increasing exponentially", "image": [], "datePublished": "2026-11-19T09:13:00", "dateModified": "2026-11-19T09:13:00", "mainEntityOfPage": "https://railfansday.github.io/berita1jam/world.html#artikel-7464"}</script>
     <h2>Here’s the precise moment when cyberattacks started increasing exponentially</h2>
@@ -6346,510 +6779,6 @@ The Leonhart family is one of the only two Epic families landing in the S tier i
 <p>Second celebrity injunction: What we know and what it means</p>
                 <p style="margin-top: 25px;">
                     <a href="https://www.standard.co.uk/sport/football/arsenal-fc-transfer-news-alex-scott-b1304897.html" target="_blank" rel="nofollow noopener" style="color: #0d6efd; text-decoration: none; font-weight: bold;">
-                        &rarr; Baca artikel asli
-                    </a>
-                </p>
-            </div>
-            
-<div style="text-align:center; margin:20px 0;">
-    <script type="text/javascript">
-        atOptions = {'key' : 'f9e40eb3b3cd05f1038aac7b36b33ad2','format' : 'iframe','height' : 90,'width' : 728,'params' : {}};
-    </script>
-    <script type="text/javascript" src="https://upholdbrilliancerecast.com/f9e40eb3b3cd05f1038aac7b36b33ad2/invoke.js"></script>
-</div>
-
-            
-        
-<div style="text-align:center; margin:20px 0;">
-    <script type="text/javascript">
-        atOptions = {'key' : 'f9e40eb3b3cd05f1038aac7b36b33ad2','format' : 'iframe','height' : 90,'width' : 728,'params' : {}};
-    </script>
-    <script type="text/javascript" src="https://upholdbrilliancerecast.com/f9e40eb3b3cd05f1038aac7b36b33ad2/invoke.js"></script>
-</div>
-
-    </div>
-</article>
-<article class="article-card" id="artikel-5361">
-    <script type="application/ld+json">{"@context": "https://schema.org", "@type": "NewsArticle", "headline": "England's Euro 2028 mission starts NOW! Thomas Tuchel's men must beat Spain to prove they can compete with the best - or risk their 'DNA' cursing them yet again, writes OLIVER HOLT", "image": ["https://i.dailymail.com/1s/2026/11/14/21/112512097-0-image-m-39_1794690455804.jpg"], "datePublished": "2026-11-14T21:10:06+0000", "dateModified": "2026-11-14T21:10:06+0000", "mainEntityOfPage": "https://railfansday.github.io/berita1jam/world.html#artikel-5361"}</script>
-    <h2>England&#x27;s Euro 2028 mission starts NOW! Thomas Tuchel&#x27;s men must beat Spain to prove they can compete with the best - or risk their &#x27;DNA&#x27; cursing them yet again, writes OLIVER HOLT</h2>
-    <div class="article-meta">
-        📅 2026-11-14 &nbsp;|&nbsp; Category: <strong>World</strong> &nbsp;|&nbsp; 
-        <a href="https://www.dailymail.com/sport/football/article-16293007/england-spain-euro-2028-oliver-holt.html?ns_mchannel=rss&amp;ns_campaign=1490&amp;ito=1490" target="_blank" rel="nofollow">Read Source &rarr;</a>
-    </div>
-    <div class="article-body">
-        <img src="https://i.dailymail.com/1s/2026/11/14/21/112512097-0-image-m-39_1794690455804.jpg" alt="England&#x27;s Euro 2028 mission starts NOW! Thomas Tuchel&#x27;s men must beat Spain to prove they can compete with the best - or risk their &#x27;DNA&#x27; cursing them yet again, writes OLIVER HOLT" loading="lazy">
-        
-            <div style="text-align:center; margin-bottom:20px;"><img src="https://i.dailymail.com/1s/2026/11/14/21/112512097-0-image-m-39_1794690455804.jpg" alt="England's Euro 2028 mission starts NOW! Thomas Tuchel's men must beat Spain to prove they can compete with the best - or risk their 'DNA' cursing them yet again, writes OLIVER HOLT" style="max-width:100%; height:auto; border-radius:8px;" loading="lazy"></div>
-            
-<div style="text-align:center; margin:20px 0;">
-    <script type="text/javascript">
-        atOptions = {'key' : 'f9e40eb3b3cd05f1038aac7b36b33ad2','format' : 'iframe','height' : 90,'width' : 728,'params' : {}};
-    </script>
-    <script type="text/javascript" src="https://upholdbrilliancerecast.com/f9e40eb3b3cd05f1038aac7b36b33ad2/invoke.js"></script>
-</div>
-
-            <div class="article-body" style="font-size: 16px; line-height: 1.8; color: #333;">
-                <p>Published:  16:10 EST, 14 November 2026   |  Updated:  19:04 EST, 14 November 2026</p>
-<p>It is four months, almost to the day, since England shrank from the call of history and lost their World Cup semi-final to Argentina in Atlanta but Thomas Tuchel may not believe that the Nations League tie against Spain in the Metropolitano on Sunday evening represents his best shot at redemption for the way things played out that afternoon in America’s South.</p>
-<p>That is largely because Tuchel does not appear to believe he has anything to redeem himself for. The manner of his side’s capitulation - and the substitutions he made - in the Mercedes-Benz Stadium last July enraged the nation, but Tuchel said the fault was in the damned DNA of the English, that we were underlings, and that our players found it constitutionally impossible to keep hold of the ball.</p>
-<p>Whatever Tuchel thinks, the fact remains that the tie against Lamine Yamal, Fabian Ruiz, Pedri and Mikel Oyarzabal and the rest of the world champions at the home of Atletico Madrid offers Tuchel and his players the opportunity to encourage themselves and their fans that they are not destined to be also-rans wired to fall at the final hurdle for evermore.</p>
-<p>Spain are formidable opposition. They are on a record-breaking run of 43 matches unbeaten and have won their last 12 in succession. They haven't drawn a game since their June 15 game against Cape Verde in the World Cup. Their last defeat was on March 22, 2024, when they lost 1-0 to Colombia in a friendly. Some ask whether they are the best international side the world has ever seen.</p>
-<p>‘Spain seem unbeatable,’ Tuchel said, when he walked into the press room at the Metropolitano on Saturday night and heard hymns of praise being lavished upon the opponents he is about to face.</p>
-<p>‘They have a very strong identity and a very strong mentality. We are trying to take it away from them. We are up for it. We are up for the fight. We are up for a spectacular match. We can see how far we can push the limits with the world champions in Madrid. The group is full of self-belief and rightly so.’</p>
-<p>England must beat Spain to prove they can compete with the best - even if they have flaws</p>
-<p>Thomas Tuchel must show he can find a way around the limitations presented by the 'DNA' he has complained about</p>
-<p>This may be the toughest game that Tuchel’s England side play until the European Championships in 2028, where the final will be contested at Wembley, and they will play all their games at home. They need to go into that tournament with the belief that they can beat the best when the pressure is at its highest.</p>
-<p>Beating Spain away in the final game of the group phase of the Nations League is not quite the same as a critical match at a major tournament but it is as stiff a challenge as Tuchel is going to face until then. Beating Croatia 7-0 in front of gangs of schoolkids in Rijeka last month was hailed as the best England performance of the Tuchel era. Which says it all, really.</p>
-<p>It was a great performance in a relatively meaningless match. Now it is time for him to show that he can marshal an England side to succeed against the very best, not fall apart when the prize is in sight. His protestations of powerlessness in the aftermath of the Argentina defeat were not a good look for a coach who was hired with the idea that his coaching prowess and his game management could get England over the line.</p>
-<p>Has he learned anything from the manner of the Argentina defeat? ‘This game against Spain will be proof of concept at the highest level,’ he said, ‘but we are up for it. I think we have taken the next step after the World Cup. The best thing is to trust our process and trust ourselves. We need to be clear about how we want to impose ourselves and I think that is all visible.’</p>
-<p>Now it is time for him to show that he can find a way past the limitations of England’s footballing DNA, find a way to compete with Spain and France when it really matters, and find a way to end the culture of near misses that has come to be England’s lot in the last decade of appearances in semi-finals and finals.</p>
-<p>England have played six matches since that day of crushing disappointment in Atlanta and scored 22 goals. But in the only one of those matches that really mattered, they lost 3-2 to Spain at Wembley in the opening tie of their Nations League campaign at the end of September, a game in which they were largely outclassed by Luis de la Fuente’s team.</p>
-<p>Spain are what England have to aim for. Tuchel mentioned their example and their ability and their mindset straight after the semi-final loss to Argentina. ‘Ball possession plays a crucial role,’ he said at his post-match press conference in Atlanta. ‘It’s maybe not in our DNA like it is in our Spanish DNA or in our Argentinian-Brazilian DNA, to take the ball and control the game with the ball.’</p>
-<p>This may well be their toughest game until the final of the 2028 European Championships, if they get that far</p>
-<p>The England coach said more recently that England need to go back to trusting a traditional style that emphasises direct, high-intensity physicality rather than trying to copy Spanish patience in ball-retention. England, though, were taught a lesson in sophistication by the Spanish in September.</p>
-<p>And for all the attention lavished on Yamal, Spain’s defence is the best in the world. Rodri, the shield for that defence and also the world’s best in the role, is not fit for this game but even without him, Spain’s back-line inspires an awful lot more confidence than England’s.</p>
-<p>‘They were the best in the World Cup at the back,’ Declan Rice, England’s central midfielder, said on Saturday. ‘Defence wins you titles. Everyone talks about their attacking talent but you look at their central defenders, their full backs and the way their midfielders contribute to the defence, too.’</p>
-<p>That defence will have to stop England’s resurgent front line, led by Ballon d’Or winner Harry Kane, who could be flanked by Anthony Gordon and Morgan Rogers and backed up by the supreme talent of Jude Bellingham just behind them.</p>
-<p>Bellingham’s improving relationship with Tuchel, which cannot have been harmed by the inclusion of Bellingham’s brother, Jobe, in this squad, is another reason to hope that England still retain the capacity to improve after the World Cup. The elder Bellingham has become England’s most influential player.</p>
-<p>England at their best would be one of the few teams capable of extending them. Rice said on Saturday that the game between the two sides was ‘massive’. England need to prove they can find a way to get closer to the world champions. To beat them, Rice said, would be a ‘massive statement’.</p>
-<p>‘Playing against them is a great incentive to win. It will show where we are as a group. We are trying to attack teams full throttle and with players like Harry Kane, Jude Bellingham and Morgan Rogers in our attack, it feels as if it is going to take off one night and maybe tomorrow night will be the night. We can beat Spain. For sure, we can.’</p>
-<p>Tuchel needs to prove England can win, not just be noble contenders. They need to prove that their DNA need not be a curse.</p>
-                <p style="margin-top: 25px;">
-                    <a href="https://www.dailymail.com/sport/football/article-16293007/england-spain-euro-2028-oliver-holt.html?ns_mchannel=rss&ns_campaign=1490&ito=1490" target="_blank" rel="nofollow noopener" style="color: #0d6efd; text-decoration: none; font-weight: bold;">
-                        &rarr; Baca artikel asli
-                    </a>
-                </p>
-            </div>
-            
-<div style="text-align:center; margin:20px 0;">
-    <script type="text/javascript">
-        atOptions = {'key' : 'f9e40eb3b3cd05f1038aac7b36b33ad2','format' : 'iframe','height' : 90,'width' : 728,'params' : {}};
-    </script>
-    <script type="text/javascript" src="https://upholdbrilliancerecast.com/f9e40eb3b3cd05f1038aac7b36b33ad2/invoke.js"></script>
-</div>
-
-            
-        
-<div style="text-align:center; margin:20px 0;">
-    <script type="text/javascript">
-        atOptions = {'key' : 'f9e40eb3b3cd05f1038aac7b36b33ad2','format' : 'iframe','height' : 90,'width' : 728,'params' : {}};
-    </script>
-    <script type="text/javascript" src="https://upholdbrilliancerecast.com/f9e40eb3b3cd05f1038aac7b36b33ad2/invoke.js"></script>
-</div>
-
-    </div>
-</article>
-<article class="article-card" id="artikel-5174">
-    <script type="application/ld+json">{"@context": "https://schema.org", "@type": "NewsArticle", "headline": "Werner Holzer Prize awarded to Katja Gloger and DW's Jaafar Abdul Karim", "image": ["https://static.dw.com/image/79945453_6.jpg"], "datePublished": "2026-11-14T15:24:00", "dateModified": "2026-11-14T15:24:00", "mainEntityOfPage": "https://railfansday.github.io/berita1jam/world.html#artikel-5174"}</script>
-    <h2>Werner Holzer Prize awarded to Katja Gloger and DW&#x27;s Jaafar Abdul Karim</h2>
-    <div class="article-meta">
-        📅 Nov 14, 2026 &nbsp;|&nbsp; Category: <strong>World</strong> &nbsp;|&nbsp; 
-        <a href="https://www.dw.com/en/werner-holzer-prize-awarded-to-katja-gloger-and-dw-s-jaafar-abdul-karim/a-79946916?maca=en-rss-en-all-1573-rdf" target="_blank" rel="nofollow">Read Source &rarr;</a>
-    </div>
-    <div class="article-body">
-        <img src="https://static.dw.com/image/79945453_6.jpg" alt="Werner Holzer Prize awarded to Katja Gloger and DW&#x27;s Jaafar Abdul Karim" loading="lazy">
-        
-            <div style="text-align:center; margin-bottom:20px;"><img src="https://static.dw.com/image/79945453_6.jpg" alt="Werner Holzer Prize awarded to Katja Gloger and DW's Jaafar Abdul Karim" style="max-width:100%; height:auto; border-radius:8px;" loading="lazy"></div>
-            
-<div style="text-align:center; margin:20px 0;">
-    <script type="text/javascript">
-        atOptions = {'key' : 'f9e40eb3b3cd05f1038aac7b36b33ad2','format' : 'iframe','height' : 90,'width' : 728,'params' : {}};
-    </script>
-    <script type="text/javascript" src="https://upholdbrilliancerecast.com/f9e40eb3b3cd05f1038aac7b36b33ad2/invoke.js"></script>
-</div>
-
-            <div class="article-body" style="font-size: 16px; line-height: 1.8; color: #333;">
-                <p>DW journalist Jaafar Abdul Karim and Russia correspondent Katja Gloger have been awarded the prestigious Werner Holzer Prize for international journalism.</p>
-<p>At a time when press freedom is under pressure and international newsrooms are shrinking, the Werner Holzer Prize celebrates a profession that many consider indispensable to democracy: foreign correspondence.</p>
-<p>Presented in honor of Werner Holzer, the veteran reporter and former editor-in-chief of the German daily newspaper Frankfurter Rundschau, this year's award coincided with what would have been his 100th birthday. Holzer spent decades reporting from some of the world's most important hot spots and championing international journalism.</p>
-<p>At the award ceremony in Frankfurt's Römer, the city's historic town hall, Mayor Mike Josef recalled that fundamental rights such as freedom of speech and freedom of the press were first enshrined for all Germans by the Frankfurt Parliament in the nearby Paulskirche in 1848.</p>
-<p>To view this video please enable JavaScript, and consider upgrading to a web browser that supports HTML5 video</p>
-<p>The 2026 winners reflect the breadth and ambition of the award. First prize went to Katja Gloger, a veteran Russia correspondent who moved to Moscow in 1989 and accompanied Vladimir Putin during the early years of his presidency.</p>
-<p>In her recent nonfiction book, "The Failure: An Investigative Report of Germany's Russia Policy," Gloger and co-author Georg Mascolo offer a searing critique of the misjudgments and illusions that shaped German policy toward Russia for decades.</p>
-<p>Second prize was awarded to DW journalist and presenter Jaafar Abdul Karim. His talk show JaafarTalk reaches millions of viewers across the Arab world and in Germany. Whether in Tunis, Beirut or Cairo, Abdul Karim tackles subjects that are often considered taboo.</p>
-<p>A research grant went to freelance journalist Luise Land, whose current project explores why her German-Namibian family still owns extensive landholdings in Namibia today. By tracing that history, she examines the enduring legacy of the genocide against the Herero and Nama peoples by German colonial forces in the early 20th century.</p>
-<p>"Katja Gloger is one of the leading foreign policy reporters. For decades, she has been among the foremost experts on Russia and speaks out on uncomfortable truths," the jury stated on Friday, explaining its decision to honor Gloger. "Like almost no one else, she has gained access to the very heart of the Kremlin's power elite — from Mikhail Gorbachev to Vladimir Putin."</p>
-<p>At the prize-giving ceremony, Gloger delivered a passionate plea for more journalism — and more international coverage — in the German press. "We must defend trustworthy, reliable and fact-based journalism with everything in our power," she said.</p>
-<p>To view this video please enable JavaScript, and consider upgrading to a web browser that supports HTML5 video</p>
-<p>Gloger worked for Reporters Without Borders for 12 years. "The latest rankings show that only one in 100 people can get their information from free, independent journalism and a free, independent press. That shows what's at stake," she said.</p>
-<p>The prize winner also said she would dedicate the award to journalists in exile and to her colleagues at Novaya Gazeta, the independent Russian newspaper long known for its critical reporting on the Kremlin. Earlier this week, the paper was forced to shut down its operations in Russia and leave its Moscow newsroom.</p>
-<p>In his acceptance speech, Jaafar Abdul Karim said journalism has become more challenging and exhausting than ever. The DW host spoke of hatred and incitement, attacks and threats, both online and offline, in the regions he reports on as well as in Germany.</p>
-<p>Such pressure, he said, takes a personal toll — yet giving up is not an option. "When I listen to my heart, I know I have to keep going," he said. The answer, he argued, is a form of journalism that fosters dialogue, embraces multiple perspectives and helps bridge divides rather than deepen them.</p>
-<p>"I firmly believe in the power of dialogue, today more than ever. That's why we must talk to one another. Even when it gets difficult. Even when we disagree. Or perhaps precisely because of that," he said.</p>
-<p>Listening doesn't mean agreeing, and understanding doesn't mean being in agreement. "Especially now, in times of polarization, when those who believe they're always right are often the loudest, we as journalists have a special responsibility. When everyone is just shouting into their own bubbles or communities, we need journalists who connect these bubbles with one another," he said.</p>
-<p>The jury praised Abdul Karim for creating programs at DW that reach millions of young people across the Arab world and in Germany. "His journalism fosters dialogue between countries, between generations, and between religions. He has set new standards," the jury stated.</p>
-<p>So far in 2026, JaafarTalk has already garnered more than 1.1 billion views across all platforms, and its community has grown to more than 9 million followers. Its motto: "Diversity fosters dialogue."</p>
-<p>"We need fact-based journalism that promotes dialogue and reflects the diversity of our society," Abdul Karim stressed. "By that, I mean an honest and open dialogue in which we do not look away or remain silent. On the contrary, we must take a clear stand against racism, antisemitism, Islamophobia, discrimination, sexism, and hate speech — no matter which side they come from."</p>
-<p>This article was originally written in German.</p>
-                <p style="margin-top: 25px;">
-                    <a href="https://www.dw.com/en/werner-holzer-prize-awarded-to-katja-gloger-and-dw-s-jaafar-abdul-karim/a-79946916?maca=en-rss-en-all-1573-rdf" target="_blank" rel="nofollow noopener" style="color: #0d6efd; text-decoration: none; font-weight: bold;">
-                        &rarr; Baca artikel asli
-                    </a>
-                </p>
-            </div>
-            
-<div style="text-align:center; margin:20px 0;">
-    <script type="text/javascript">
-        atOptions = {'key' : 'f9e40eb3b3cd05f1038aac7b36b33ad2','format' : 'iframe','height' : 90,'width' : 728,'params' : {}};
-    </script>
-    <script type="text/javascript" src="https://upholdbrilliancerecast.com/f9e40eb3b3cd05f1038aac7b36b33ad2/invoke.js"></script>
-</div>
-
-            
-        
-<div style="text-align:center; margin:20px 0;">
-    <script type="text/javascript">
-        atOptions = {'key' : 'f9e40eb3b3cd05f1038aac7b36b33ad2','format' : 'iframe','height' : 90,'width' : 728,'params' : {}};
-    </script>
-    <script type="text/javascript" src="https://upholdbrilliancerecast.com/f9e40eb3b3cd05f1038aac7b36b33ad2/invoke.js"></script>
-</div>
-
-    </div>
-</article>
-<article class="article-card" id="artikel-5330">
-    <script type="application/ld+json">{"@context": "https://schema.org", "@type": "NewsArticle", "headline": "rune bosse puts living trees on life support in a vision of ecological collapse", "image": ["https://www.designboom.com/twitterimages/uploads/2026/11/rune-bosse-lung-trees-designboom-FB.jpg"], "datePublished": "2026-11-14T15:15:22+00:00", "dateModified": "2026-11-14T15:15:22+00:00", "mainEntityOfPage": "https://railfansday.github.io/berita1jam/world.html#artikel-5330"}</script>
-    <h2>rune bosse puts living trees on life support in a vision of ecological collapse</h2>
-    <div class="article-meta">
-        📅 Nov 14, 2026 &nbsp;|&nbsp; Category: <strong>World</strong> &nbsp;|&nbsp; 
-        <a href="https://www.designboom.com/art/rune-bosse-living-lung-trees-life-support-ecological-collapse/" target="_blank" rel="nofollow">Read Source &rarr;</a>
-    </div>
-    <div class="article-body">
-        <img src="https://www.designboom.com/twitterimages/uploads/2026/11/rune-bosse-lung-trees-designboom-FB.jpg" alt="rune bosse puts living trees on life support in a vision of ecological collapse" loading="lazy">
-        
-            <div style="text-align:center; margin-bottom:20px;"><img src="https://www.designboom.com/twitterimages/uploads/2026/11/rune-bosse-lung-trees-designboom-FB.jpg" alt="rune bosse puts living trees on life support in a vision of ecological collapse" style="max-width:100%; height:auto; border-radius:8px;" loading="lazy"></div>
-            
-<div style="text-align:center; margin:20px 0;">
-    <script type="text/javascript">
-        atOptions = {'key' : 'f9e40eb3b3cd05f1038aac7b36b33ad2','format' : 'iframe','height' : 90,'width' : 728,'params' : {}};
-    </script>
-    <script type="text/javascript" src="https://upholdbrilliancerecast.com/f9e40eb3b3cd05f1038aac7b36b33ad2/invoke.js"></script>
-</div>
-
-            <div class="article-body" style="font-size: 16px; line-height: 1.8; color: #333;">
-                <p>equipped with respirators and artificial lighting, rune bosse's 'tree lungs' imagines a future where nature itself may need life support.</p>
-<p>Danish artist Rune Bosse places living trees on artificial life support in Lung Trees, an installation presented at the Danish Architecture Center in Copenhagen as part of its Age of Nature exhibition, which ran through September 2026. Each tree stands inside a transparent, inflated plastic enclosure, and is surrounded by mechanical equipment and artificial lighting. With their branches reaching toward overhead lamps, each tree seems to have been removed from the forest and placed under intensive care.</p>
-<p>The installation imagines a future in which trees might depend on technology to survive, even as humans continue to depend on the ecological systems that trees help sustain. It reverses a relationship we tend to take for granted. Forests have long been described as the lungs of the planet, absorbing carbon dioxide through photosynthesis and releasing oxygen. Here, Bosse gives those lungs a mechanical counterpart, and suggests a world in which the natural systems supporting human life might themselves require artificial support.</p>
-<p>The installation brings together living vegetation and an exposed network of machines. Transparent plastic sheeting stretches over metal frames, enclosing the trees while allowing visitors to see the soil and branches inside. Artificial lights illuminate the foliage, while equipment supplies air to the enclosed environment. The temporary structures have the practical appearance of makeshift greenhouses, although their association with medical equipment gives them a more unsettling character.</p>
-<p>In a related 2025 presentation at Berlin’s Neue Nationalgalerie, titled Lungetræ / Lungenbaum, Bosse made the breathing movement particularly visible. A living tree and a section of forest floor were enclosed within a flexible PVC membrane attached to a metal framework. At regular intervals, a respirator pushed air into the structure, causing the plastic to expand and slowly collapse around the tree. The movement resembles the inflation of a giant lung, giving physical form to the invisible exchange of gases between a tree and its surroundings.</p>
-<p>Bosse’s interest in trees extends well beyond the gallery. Alongside his training at the Royal Danish Academy of Fine Arts, the artist studied forestry and nature management, developing a practice that follows the growth of living plants over time. At Oremandsgaard, an estate in southern Denmark, he has established an outdoor forest laboratory where he experiments with shaping trees as they grow. Some are bent into unusual forms, while others are guided to grow together. Their final shapes emerge over years, influenced by the conditions of the surrounding landscape.</p>
-<p>This work grew partly from his frustration with bringing natural materials into museums, where plants often have to be cut, dried or preserved before they can be exhibited. His outdoor experiments allow trees to remain alive and continue changing long after the artist’s initial intervention. Lung Trees approaches the same relationship from a different direction. Inside the gallery, keeping the trees alive becomes part of the artwork itself, exposing the equipment and artificial conditions that make their temporary existence possible.</p>
-<p>The installation touches on an uncomfortable contradiction in the way humans approach ecological preservation. By enclosing the trees and supplying them with artificial conditions, Bosse creates an image of protection that also suggests dependency. The machinery appears to care for the living organisms, yet the entire arrangement places their survival within a system designed and operated by humans. The trees remain living participants in the work, although their relationship with the surrounding environment has been fundamentally altered.</p>
-<p>Bosse first developed Lungetræer in 2019, and its more recent presentations give the work a continuing relevance amid growing concerns about biodiversity loss and the deterioration of ecosystems. The installation offers a speculative glimpse of what technological preservation might look like when ecological conditions can no longer support life on their own. Its most unsettling quality comes from the simplicity of the scene.</p>
-<p>A living tree stands inside a plastic chamber while a machine pushes air around it. The visitor watches the artificial lung expand and contract, confronted with the possibility that the relationship between humans and forests could one day become this fragile.</p>
-<p>exhibitions: Age of Nature, Danish Architecture Center, Copenhagen, Denmark (2025-26) & Lungetræ / Lungenbaum, Neue Nationalgalerie, Berlin, Germany (2025)</p>
-<p>This article is part of designboom’s POSTHUMAN UTOPIAS chapter, exploring what happens when humans are no longer the measure of all things. These stories rethink our relationship with the planet through interspecies architecture, living materials, regenerative landscapes and emerging technologies – learn more here! The chapter is presented in partnership with INDX|GLOBAL – a global cultural platform placing Indian architecture, design, and creative intelligence in conversation with the world.</p>
-<p>Each designboom editorial series explores one theme in depth through projects, interviews, features and news across architecture, design, art and technology. Discover more chapters here, and get in touch if you’d like to submit a story through our submissions portal or contact form.</p>
-<p>your own online design shop — no sales commission collected</p>
-<p>guided byutopian optimism, we design a future worth believing in.</p>
-<p>designboom © 1999-2026 - part of DAAily platforms AG</p>
-                <p style="margin-top: 25px;">
-                    <a href="https://www.designboom.com/art/rune-bosse-living-lung-trees-life-support-ecological-collapse/" target="_blank" rel="nofollow noopener" style="color: #0d6efd; text-decoration: none; font-weight: bold;">
-                        &rarr; Baca artikel asli
-                    </a>
-                </p>
-            </div>
-            
-<div style="text-align:center; margin:20px 0;">
-    <script type="text/javascript">
-        atOptions = {'key' : 'f9e40eb3b3cd05f1038aac7b36b33ad2','format' : 'iframe','height' : 90,'width' : 728,'params' : {}};
-    </script>
-    <script type="text/javascript" src="https://upholdbrilliancerecast.com/f9e40eb3b3cd05f1038aac7b36b33ad2/invoke.js"></script>
-</div>
-
-            
-        
-<div style="text-align:center; margin:20px 0;">
-    <script type="text/javascript">
-        atOptions = {'key' : 'f9e40eb3b3cd05f1038aac7b36b33ad2','format' : 'iframe','height' : 90,'width' : 728,'params' : {}};
-    </script>
-    <script type="text/javascript" src="https://upholdbrilliancerecast.com/f9e40eb3b3cd05f1038aac7b36b33ad2/invoke.js"></script>
-</div>
-
-    </div>
-</article>
-<article class="article-card" id="artikel-5266">
-    <script type="application/ld+json">{"@context": "https://schema.org", "@type": "NewsArticle", "headline": "'The Rings of Power's Tyroe Muhafidin Explains Theo's Darkest Season 3 Decision", "image": ["https://static0.colliderimages.com/wordpress/wp-content/uploads/2026/11/rings-of-power-season-3-tyroe-muhafidin.jpg?w=1600&h=900&fit=crop"], "datePublished": "2026-11-14T15:01:12Z", "dateModified": "2026-11-14T15:01:12Z", "mainEntityOfPage": "https://railfansday.github.io/berita1jam/world.html#artikel-5266"}</script>
-    <h2>&#x27;The Rings of Power&#x27;s Tyroe Muhafidin Explains Theo&#x27;s Darkest Season 3 Decision</h2>
-    <div class="article-meta">
-        📅 Nov 14, 2026 &nbsp;|&nbsp; Category: <strong>World</strong> &nbsp;|&nbsp; 
-        <a href="https://collider.com/rings-of-power-season-3-theo-ringservant-arondir-death-tyroe-muhafidin/" target="_blank" rel="nofollow">Read Source &rarr;</a>
-    </div>
-    <div class="article-body">
-        <img src="https://static0.colliderimages.com/wordpress/wp-content/uploads/2026/11/rings-of-power-season-3-tyroe-muhafidin.jpg?w=1600&amp;h=900&amp;fit=crop" alt="&#x27;The Rings of Power&#x27;s Tyroe Muhafidin Explains Theo&#x27;s Darkest Season 3 Decision" loading="lazy">
-        
-            <div style="text-align:center; margin-bottom:20px;"><img src="https://static0.colliderimages.com/wordpress/wp-content/uploads/2026/11/rings-of-power-season-3-tyroe-muhafidin.jpg?w=1600&h=900&fit=crop" alt="'The Rings of Power's Tyroe Muhafidin Explains Theo's Darkest Season 3 Decision" style="max-width:100%; height:auto; border-radius:8px;" loading="lazy"></div>
-            
-<div style="text-align:center; margin:20px 0;">
-    <script type="text/javascript">
-        atOptions = {'key' : 'f9e40eb3b3cd05f1038aac7b36b33ad2','format' : 'iframe','height' : 90,'width' : 728,'params' : {}};
-    </script>
-    <script type="text/javascript" src="https://upholdbrilliancerecast.com/f9e40eb3b3cd05f1038aac7b36b33ad2/invoke.js"></script>
-</div>
-
-            <div class="article-body" style="font-size: 16px; line-height: 1.8; color: #333;">
-                <p>Editor's note: The below interview contains major spoilers for The Rings of Power Season 3 Episode 4.</p>
-<p>With The Lord of the Rings: The Rings of Power finally returned for its third season, the first four episodes have established an even darker world than the one viewers remember. With the series now jumping five years ahead, Sauron's (Charlie Vickers) influence is slowly taking over Middle-earth, and the new rings of power that are up for grabs prove too tempting for certain characters to resist. One, in particular, has been grappling with the darkness since his arc began in Season 1, and it all comes to a head in Season 3's latest episode.</p>
-<p>"Gundabad" serves as an unexpected reunion for the young human Theo (Tyroe Muhafidin) and the Elf Arondir (Ismael Cruz Córdova), who last parted ways in Season 2 from the weight of their shared grief over the loss of Theo's mother and Arondir's lover, Bronwyn (Nazanin Boniadi). Yet the circumstances of their meeting in Season 3 are anything but happy; Theo has fallen sway to Sauron's manipulation, as well as the power of the ring he now wears, and aims to capture Galadriel (Morfydd Clark) for the Dark Lord. When Arondir tries to intervene, Sauron appears and orders Theo to kill the Elf, and this fatal blow seemingly cements the young man's corruption.</p>
-<p>Below, Muhafidin talks with Collider about Theo's biggest physical transformation after the series' five-year time jump, whether Theo fully trusts Sauron at this point in their relationship, why he's still holding onto guilt over his character's darkest decision yet, and more.</p>
-<p>COLLIDER: With Theo, that push and pull between the dark and the light has really been part of his journey since the beginning of the show. What were you looking forward to in terms of getting to explore even more of that darkness in Season 3?</p>
-<p>TYROE MUHAFIDIN: Just kind of fully getting to lean into it. There were so many little moments here and there throughout the first two seasons where Charlotte [Brändström] or Patrick [McKay] or whoever would say, “Maybe have a little smirk on your face while you kill this Orc.” Or maybe, “Kind of enjoy the darkness of it.” I always got a chance to kind of lean into it, so I kind of had an inkling that Theo was going to go in this direction, but I never really quite knew.</p>
-<p>But this season, it was definitely just getting to the pinnacle of his story. I think this is where it kind of all rounds off for him. It was fun to see how someone can be driven to that sort of point, to be able to do those sorts of things. I think that's the beautiful but very tragic story of Theo, his journey to becoming a Ring-servant.</p>
-<p>Season 3's time jump establishes where everybody is on the chessboard of Middle-earth, but it leads to pretty significant development for certain characters. How did you want to portray the passage of time for Theo in terms of his physical growth, and what's happened in those five years since we last saw him?</p>
-<p>MUHAFIDIN: It wasn't so much how much stronger he could be, but it was how much more worn down he could be — because he gets his chance to be strong later, which was also really fun to do.</p>
-<p>I did a lot of work with a movement coach before — I'd say two months of workshopping movement, because it's a five-year time jump, and I was 20 at the time. I was still youthful. When you see someone young, there's a specific kind of bounce, and I'm also quite bouncy and filled with a lot of excitement. But Theo is the complete opposite. He's tired and worn down, and he's not excited about anything. He has no hope for anything. I had to work on flipping my entire body language into what that looks like.</p>
-<p>It was something I'd never had to think about before because I was always just playing my own age, whereas Theo was an adult by that time, but I still felt like a kid. So, playing an adult was a challenge.</p>
-<p>Season 3 establishes that Sauron is putting out a summons about these rings of power that are up for grabs. The potential to be a Ringservant is being dangled in front of otherwise ordinary people, but these men are forced to fight each other to the death to claim one of these rings. How did you want to portray the way in which that desperation manifests for Theo? For him, does it feel like it's all or nothing in that moment?</p>
-<p>MUHAFIDIN: Exactly that. I think Theo this season is at a point where he has no hope for anything, and he can only see a life of pain and misery in front of him. He's at a point now where it's not worth living that life. I think he would genuinely rather die than keep living the life he's living.</p>
-<p>The fact that he gets even just an opportunity at something so grand, and something that he's had a taste of before, he’s drawn to it, more and more excited by it. Playing into that, I think he was at a point where he knew the darkness, and he was prepared, going there, to fight his friends. I think he was prepared for whatever Sauron was planning, because he knew how bad Sauron was, but he was ready.</p>
-<p>Córdova shares how personal loss and close on-set bonds shaped the culmination of Arondir's Season 3 storyline.</p>
-<p>It kicks off a really interesting dynamic that we get to see you and Charlie [Vickers] play, because it very much feels like Theo has a childlike yearning to know more about his dad, and Sauron immediately senses that this is something he can exploit. As much as Theo is seeking his own answers, it also feels like he's personally gravitating towards Sauron as this strong mentor figure.</p>
-<p>MUHAFIDIN: Yeah. I would say Theo's biggest trajectory, what led to his downfall, is the effect that his role models and people who were supposed to guide him had on him. He had his mother, who was his biggest role model and biggest guidance, and he lost her. He feels betrayed by the fact that Arondir left him. He never had a father.</p>
-<p>So he never had a consistent role model to show him how to live life, who to be, and Sauron knows this, and knows that he can take on that role, and Theo is more than welcome to let him, because his whole life, he has just been searching for someone to show him the way, to look after him, to guide him, and he has just been let down constantly. Sauron gives the promise that he won't let him down.</p>
-<p>Even the scene where Sauron supposedly summons Theo's father from the beyond, so to speak, I’m interested in how you wanted to play it from Theo's perspective. Is he so willing to believe Sauron that even if some of the details seem a little fishy, he'd push that doubt aside?</p>
-<p>MUHAFIDIN: At first, it definitely is all real to him, and he believes it, because I think this is the moment he's been waiting for his entire life. This is so huge. There's just so much adrenaline and all that discovery and all this, and there's so much weight to it all that, at first, he doesn't quite process it.</p>
-<p>There is a moment we played when Theo becomes so entranced by Sauron and the whole situation, but then he steps away. He gets lost in it and believes it all, but he snaps out of it — and it's the moment when Sauron says that his mom killed his dad. That was the moment when the doubt started to seep in. Maybe if Sauron hadn't opened that ring box, who knows? Maybe Theo would have walked out of there. Though I guess if he tried to walk out, he probably would have died.</p>
-<p>Previously, I spoke with Zubin [Varla], who plays an incredible Ringservant this season, and he mentioned his experience of wearing that armor. We've been talking about physicality already, but how does a costume that's arguably different than anything you've really worn on the show impact how you carry yourself as the character?</p>
-<p>MUHAFIDIN: The costume was the biggest source of inspiration on the day for me. Every single time. The big thing for me was the gauntlets. As soon as the gloves go on, and you look at your hands, especially if there's a ring on it... there's something about looking at your hands and seeing something scary that you just feel scary automatically, you know? That costume, immediately, every single time, made me feel terrifying and powerful. It was the biggest blessing to be able to have that, because it was the best tool as an actor: to use what's around you. So, yeah, that costume was awesome.</p>
-<p>I mean, it was hot. It was a little uncomfortable, but every single time I got a glimpse of myself in any kind of mirror, I was like, “I look so cool!” Especially when I had the sword in, as well, and the mask and crown. That was incredible. Being behind a mask and walking around in that kind of way, you just feel powerful. There's no other way to describe it.</p>
-<p>I hate to bring up Arondir now, but I have to. How did you prepare to get into the headspace of such an emotionally heavy scene, knowing that everybody was going to be saying goodbye to Ismael [Cruz Córdova], as well?</p>
-<p>MUHAFIDIN: The whole sequence was shot over two weeks, but I was only in for a few days around there, and we didn't shoot any of the close-up stuff until the last day. We had been doing all the wides, so we'd been doing this action over and over again over a few days, and when I was doing it, the feeling of it all wasn't really there yet. Ismael and I, we're good mates, so it was just a bunch of fun on set.</p>
-<p>But the day when the close-ups were shot, there was this cold in the air. It was so intense because, obviously, it was so big for Ismael, and I'm trying to be there for him and be a good castmate, and he was there for me, too. But it was crazy because, like you said, everyone was saying goodbye to Ismael, and everyone was giving him hugs and showing that love because it was his last day on set, but I couldn't help but feel like it was my fault, even though it wasn’t.</p>
-<p>As soon as we finished, I felt that guilt, and the feeling has never left — that feeling of, “What have I done?” It was immediate, and it was real. For the next six months, I was so wracked with actual, genuine guilt over it. For months and months, I would see his face and get panic attacks sometimes, like at that exact moment, because it was so huge and such a scary moment.</p>
-<p>At the end of each day, Is and I would be able to have a sit-down chat and hug it out and have a heart-to-heart, and it was really beautiful. It was this real fine line of us trying to have fun and be bro-y and whatever, but we had to make sure that we were really there for each other. All the emotions in the scene in general are a lot, and we had to stay in that kind of headspace for days and days and days. So, it was draining, but we were all there for each other. It was a really beautiful time.</p>
-<p>Looking ahead to the rest of the season, what can you tease about where Theo's arc is heading now that he's crossed this pretty impactful and emotional line?</p>
-<p>MUHAFIDIN: His journey from here on is emotional, and I think it's a real moment of self-discovery and self-reflection. There's also more questions. There's more questions raised about what he's destined to do.</p>
-<p>The Lord of the Rings: The Rings of Power Season 3 is now streaming on Prime Video, with new episodes releasing Wednesdays.</p>
-<p>We want to hear from you. Share your perspective in the comments below, and please keep the conversation respectful.</p>
-<p>The best of Collider, directly in your inbox.</p>
-                <p style="margin-top: 25px;">
-                    <a href="https://collider.com/rings-of-power-season-3-theo-ringservant-arondir-death-tyroe-muhafidin/" target="_blank" rel="nofollow noopener" style="color: #0d6efd; text-decoration: none; font-weight: bold;">
-                        &rarr; Baca artikel asli
-                    </a>
-                </p>
-            </div>
-            
-<div style="text-align:center; margin:20px 0;">
-    <script type="text/javascript">
-        atOptions = {'key' : 'f9e40eb3b3cd05f1038aac7b36b33ad2','format' : 'iframe','height' : 90,'width' : 728,'params' : {}};
-    </script>
-    <script type="text/javascript" src="https://upholdbrilliancerecast.com/f9e40eb3b3cd05f1038aac7b36b33ad2/invoke.js"></script>
-</div>
-
-            
-        
-<div style="text-align:center; margin:20px 0;">
-    <script type="text/javascript">
-        atOptions = {'key' : 'f9e40eb3b3cd05f1038aac7b36b33ad2','format' : 'iframe','height' : 90,'width' : 728,'params' : {}};
-    </script>
-    <script type="text/javascript" src="https://upholdbrilliancerecast.com/f9e40eb3b3cd05f1038aac7b36b33ad2/invoke.js"></script>
-</div>
-
-    </div>
-</article>
-<article class="article-card" id="artikel-5307">
-    <script type="application/ld+json">{"@context": "https://schema.org", "@type": "NewsArticle", "headline": "A Menorca Farmhouse Finds Its Easy Elegance", "image": ["https://hips.hearstapps.com/hmg-prod/images/e9988052-f01b-4071-81fe-ff1df3a314ff.jpg?crop=1xw:0.798xh;0xw,0.166xh&resize=1200:*"], "datePublished": "2026-11-14T15:00:04Z", "dateModified": "2026-11-14T15:00:04Z", "mainEntityOfPage": "https://railfansday.github.io/berita1jam/world.html#artikel-5307"}</script>
-    <h2>A Menorca Farmhouse Finds Its Easy Elegance</h2>
-    <div class="article-meta">
-        📅 Nov 14, 2026 &nbsp;|&nbsp; Category: <strong>World</strong> &nbsp;|&nbsp; 
-        <a href="https://www.elledecor.com/design-decorate/house-interiors/a74208460/isabel-lopez-quesada-menorca-house-tour/" target="_blank" rel="nofollow">Read Source &rarr;</a>
-    </div>
-    <div class="article-body">
-        <img src="https://hips.hearstapps.com/hmg-prod/images/e9988052-f01b-4071-81fe-ff1df3a314ff.jpg?crop=1xw:0.798xh;0xw,0.166xh&amp;resize=1200:*" alt="A Menorca Farmhouse Finds Its Easy Elegance" loading="lazy">
-        
-            <div style="text-align:center; margin-bottom:20px;"><img src="https://hips.hearstapps.com/hmg-prod/images/e9988052-f01b-4071-81fe-ff1df3a314ff.jpg?crop=1xw:0.798xh;0xw,0.166xh&resize=1200:*" alt="A Menorca Farmhouse Finds Its Easy Elegance" style="max-width:100%; height:auto; border-radius:8px;" loading="lazy"></div>
-            
-<div style="text-align:center; margin:20px 0;">
-    <script type="text/javascript">
-        atOptions = {'key' : 'f9e40eb3b3cd05f1038aac7b36b33ad2','format' : 'iframe','height' : 90,'width' : 728,'params' : {}};
-    </script>
-    <script type="text/javascript" src="https://upholdbrilliancerecast.com/f9e40eb3b3cd05f1038aac7b36b33ad2/invoke.js"></script>
-</div>
-
-            <div class="article-body" style="font-size: 16px; line-height: 1.8; color: #333;">
-                <p>Isabel López-Quesada honored the historical essence of a 19th-century Menorcan retreat while introducing vibrant colors and an elevated ease.</p>
-<p>Above: In the living room, López-Quesada replicated the original ceiling beams and finished the walls in traditional Menorcan lime plaster. A sofa of her design is grouped with a 1960s Tito Agnoli rattan daybed, a Mexican palm leaf stool, and a custom cocktail table upholstered with a Moroccan rug.</p>
-<p>For Spanish designer Isabel López-Quesada, summers tend to revolve around Biarritz, in southwestern France, where she has a home. Still, she always carves out time for Menorca, regarded as the most laid-back of Spain’s Balearic Islands. That vibe suits the ELLE Decor A-list designer, whose signature style is luxurious but unfussy, harmonizing old and new with breezy refinement.</p>
-<p>Typically, López-Quesada goes there to relax and spend time with friends, but around five years ago she received a call from a Bilbao family who asked her to refresh their vacation home outside Mahón, Menorca’s capital. An old farm property, or finca, the five-bedroom residence required extensive updates. López-Quesada was steadfast in preserving such historical elements as a well and donkey stables, which she transformed into an indoor-outdoor bathroom with a patio and marble tub. “It was important to respect the style of Menorca,” she says. “We were very careful with the materials, so it all goes together and conveys the sentiment I want the house to have.”</p>
-<p>López-Quesada founded her namesake studio as a precocious 20-year-old Madrileña 40 years ago. Initially inspired by her mother’s yen for decorating and the work of celebrated Spanish designers such as Paco Muñoz and Fernando Benjumea, López-Quesada garnered wide attention in the early 2000s, when she converted an old Madrid wax factory into an atelier and a luxurious home for her family, filled with antiques and contemporary pieces. Soon she had interest from clients all over the world. Today López-Quesada’s 12-person team includes one of her three adult children, daughter Isabel Llanza. Five years ago the pair co-founded the lifestyle brand Isita Home, selling products they make themselves or discover on their travels.</p>
-<p>The Menorca project began by gutting the house’s interior and rebuilding it “in an old style,” López-Quesada says. Central to it all was adding custom windows and doors to each room so the island’s golden light could flood the spaces. Vaulted and beamed ceilings were left intact or were recreated. Reconfiguring the floor plan, López-Quesada eschewed a proper dining room in favor of an eat-in open kitchen. “Most of the time you are eating outside,” she says.</p>
-<p>With Menorca’s unrelenting summer sun, bougainvillea-draped pergolas were a must for leisurely alfresco lunches and dinners. Swaths of white lantana and lily of the Nile border the terraces, while “the pool reflects the sky like a mirror and provides a refreshing feel,” López-Quesada says.</p>
-<p>Her collaborator on the gardens was Spanish landscape architect Luis González-Camino. “My vision was to design a water-efficient Mediterranean garden, divided into distinct yet connected ‘garden rooms’ for different seasons and times of day,” he says. González-Camino preserved the property as a natural Mediterranean woodland, with wild olive trees providing cover.</p>
-<p>Indoors, López-Quesada installed French terra-cotta floor tiles chosen for their aged look. The three fireplaces were all handcrafted in traditional Menorcan style—a little imperfect, painted white—and decorated with vintage tiles the designer keeps in her Madrid warehouse.</p>
-<p>She offset the white ceilings and lime plaster walls with vibrant textiles and tilework in blues and greens inspired by Menorca’s native palette. An upstairs bedroom is anchored by an iron four-poster bed with a blue-and-white-striped canopy; its bath has a shower lined with lapis-colored zellige tiles. Doors, which across Menorca are customarily painted in bold shades, here are finished in verdant hues.</p>
-<p>Custom cabinets are designed with whimsically patterned cutouts for airflow, since humidity is a major factor. “On the islands, if you close the cupboards completely, mushrooms will grow inside,” López-Quesada says.</p>
-<p>Step Inside This Renovated Menorca Retreat</p>
-<p>She arrayed the spaces with a lively mix of vintage and new furnishings, emphasizing organic materials: rattan chairs, bamboo shades, Moroccan rugs, lots of linen and cotton fabrics in spirited florals or stripes. “If I use a heavy piece, then the rest is lighter,” she says. The tableware maintains the blue and green theme, including pieces from Isita Home and hand-blown glassware from neighboring Mallorca.</p>
-<p>In the end, the owners asked López-Quesada to redo their home in Spain’s Basque region as well. It’s one of several projects she currently has across the country, including reimagining a hotel in Barcelona, and she’s also designing homes in Paris, Shanghai, and the Dominican Republic. Many of her projects are with repeat clients. “That’s how it works,” the designer says. “It’s like a chain.”</p>
-<p>This story originally appeared in the November 2026 issue of ELLE Decor.</p>
-<p>Sarah Cristobal is a writer, editor, and creative consultant. She is currently editor-at-large for 10 Magazine USA, among other freelance projects.</p>
-<p>This London Townhouse Was Made for Christmas</p>
-<p>Danielle Lauder’s Dreamy West Village Closet</p>
-<p>This Los Angeles House Has “a Little Funk to It”</p>
-<p>A Former SRO Becomes a Brooklyn Dream Home</p>
-<p>Designer Phillip Thomas’s Bellport Family Retreat</p>
-<p>What Ever Happened to the Rockefeller Mansion?</p>
-<p>Inside an Art-Filled Southhampton Bachelor Pad</p>
-<p>Inside Barack and Michelle Obama’s Private Offices</p>
-<p>We may earn commission from links on this page, but we only recommend products we back.</p>
-                <p style="margin-top: 25px;">
-                    <a href="https://www.elledecor.com/design-decorate/house-interiors/a74208460/isabel-lopez-quesada-menorca-house-tour/" target="_blank" rel="nofollow noopener" style="color: #0d6efd; text-decoration: none; font-weight: bold;">
-                        &rarr; Baca artikel asli
-                    </a>
-                </p>
-            </div>
-            
-<div style="text-align:center; margin:20px 0;">
-    <script type="text/javascript">
-        atOptions = {'key' : 'f9e40eb3b3cd05f1038aac7b36b33ad2','format' : 'iframe','height' : 90,'width' : 728,'params' : {}};
-    </script>
-    <script type="text/javascript" src="https://upholdbrilliancerecast.com/f9e40eb3b3cd05f1038aac7b36b33ad2/invoke.js"></script>
-</div>
-
-            
-        
-<div style="text-align:center; margin:20px 0;">
-    <script type="text/javascript">
-        atOptions = {'key' : 'f9e40eb3b3cd05f1038aac7b36b33ad2','format' : 'iframe','height' : 90,'width' : 728,'params' : {}};
-    </script>
-    <script type="text/javascript" src="https://upholdbrilliancerecast.com/f9e40eb3b3cd05f1038aac7b36b33ad2/invoke.js"></script>
-</div>
-
-    </div>
-</article>
-<article class="article-card" id="artikel-5199">
-    <script type="application/ld+json">{"@context": "https://schema.org", "@type": "NewsArticle", "headline": "‘Alcohol, depression and cocaine’- Ex-Premier League star and Brazil striker reveals he almost died after drug overdose", "image": [], "datePublished": "2026-11-14T14:59:55", "dateModified": "2026-11-14T14:59:55", "mainEntityOfPage": "https://railfansday.github.io/berita1jam/world.html#artikel-5199"}</script>
-    <h2>‘Alcohol, depression and cocaine’- Ex-Premier League star and Brazil striker reveals he almost died after drug overdose</h2>
-    <div class="article-meta">
-        📅 Nov 14, 2026 &nbsp;|&nbsp; Category: <strong>World</strong> &nbsp;|&nbsp; 
-        <a href="https://www.thesun.co.uk/sport/41023901/mario-jardel-reveals-he-almost-died-after-drug-overdose/" target="_blank" rel="nofollow">Read Source &rarr;</a>
-    </div>
-    <div class="article-body">
-        
-        
-            
-            
-<div style="text-align:center; margin:20px 0;">
-    <script type="text/javascript">
-        atOptions = {'key' : 'f9e40eb3b3cd05f1038aac7b36b33ad2','format' : 'iframe','height' : 90,'width' : 728,'params' : {}};
-    </script>
-    <script type="text/javascript" src="https://upholdbrilliancerecast.com/f9e40eb3b3cd05f1038aac7b36b33ad2/invoke.js"></script>
-</div>
-
-            <div class="article-body" style="font-size: 16px; line-height: 1.8; color: #333;">
-                <p>FORMER Premier League striker Mario Jardel has revealed he nearly DIED from a cocaine overdose after spiralling into depression and alcohol abuse. The Brazilian, 53, enjoyed a glittering career in Europe before his life took a devastating turn following his omission from the 2002 World Cup squad. Jardel, who played for Bolton Wanderers under Sam...</p>
-                <p style="margin-top: 25px;">
-                    <a href="https://www.thesun.co.uk/sport/41023901/mario-jardel-reveals-he-almost-died-after-drug-overdose/" target="_blank" rel="nofollow noopener" style="color: #0d6efd; text-decoration: none; font-weight: bold;">
-                        &rarr; Baca artikel asli
-                    </a>
-                </p>
-            </div>
-            
-<div style="text-align:center; margin:20px 0;">
-    <script type="text/javascript">
-        atOptions = {'key' : 'f9e40eb3b3cd05f1038aac7b36b33ad2','format' : 'iframe','height' : 90,'width' : 728,'params' : {}};
-    </script>
-    <script type="text/javascript" src="https://upholdbrilliancerecast.com/f9e40eb3b3cd05f1038aac7b36b33ad2/invoke.js"></script>
-</div>
-
-            
-        
-<div style="text-align:center; margin:20px 0;">
-    <script type="text/javascript">
-        atOptions = {'key' : 'f9e40eb3b3cd05f1038aac7b36b33ad2','format' : 'iframe','height' : 90,'width' : 728,'params' : {}};
-    </script>
-    <script type="text/javascript" src="https://upholdbrilliancerecast.com/f9e40eb3b3cd05f1038aac7b36b33ad2/invoke.js"></script>
-</div>
-
-    </div>
-</article>
-<article class="article-card" id="artikel-5190">
-    <script type="application/ld+json">{"@context": "https://schema.org", "@type": "NewsArticle", "headline": "How ‘Law & Order: SVU’ Pulled Off the Impossible With Latest Milestone: ‘It Will Never Happen Again’", "image": ["https://variety.com/wp-content/uploads/2026/11/NUP_211501_01714.jpg?w=1000&h=563&crop=1"], "datePublished": "2026-11-14T14:50:38+00:00", "dateModified": "2026-11-14T14:50:38+00:00", "mainEntityOfPage": "https://railfansday.github.io/berita1jam/world.html#artikel-5190"}</script>
-    <h2>How ‘Law &amp; Order: SVU’ Pulled Off the Impossible With Latest Milestone: ‘It Will Never Happen Again’</h2>
-    <div class="article-meta">
-        📅 Nov 14, 2026 &nbsp;|&nbsp; Category: <strong>World</strong> &nbsp;|&nbsp; 
-        <a href="https://variety.com/2026/tv/news/law-and-order-svu-600th-episode-1236947263/" target="_blank" rel="nofollow">Read Source &rarr;</a>
-    </div>
-    <div class="article-body">
-        <img src="https://variety.com/wp-content/uploads/2026/11/NUP_211501_01714.jpg?w=1000&amp;h=563&amp;crop=1" alt="How ‘Law &amp; Order: SVU’ Pulled Off the Impossible With Latest Milestone: ‘It Will Never Happen Again’" loading="lazy">
-        
-            <div style="text-align:center; margin-bottom:20px;"><img src="https://variety.com/wp-content/uploads/2026/11/NUP_211501_01714.jpg?w=1000&h=563&crop=1" alt="How ‘Law & Order: SVU’ Pulled Off the Impossible With Latest Milestone: ‘It Will Never Happen Again’" style="max-width:100%; height:auto; border-radius:8px;" loading="lazy"></div>
-            
-<div style="text-align:center; margin:20px 0;">
-    <script type="text/javascript">
-        atOptions = {'key' : 'f9e40eb3b3cd05f1038aac7b36b33ad2','format' : 'iframe','height' : 90,'width' : 728,'params' : {}};
-    </script>
-    <script type="text/javascript" src="https://upholdbrilliancerecast.com/f9e40eb3b3cd05f1038aac7b36b33ad2/invoke.js"></script>
-</div>
-
-            <div class="article-body" style="font-size: 16px; line-height: 1.8; color: #333;">
-                <p>It’s a quote Ice-T’s Fin said during the 600th episode of “Law & Order: Special Victims Unit” on Thursday night — and one that means so much more than just the partnership between Benson and Stabler.</p>
-<p>The same could be said about Mariska Hargitay and Dick Wolf. The pair have been working together since the show debuted in 1999. “People throw around the word ‘family,'” Hargitay says. But for the “SVU” cast and crew, many who have been there from the start, it’s true. “To like them, to love them… I go to work and we hug, and it’s real. It feels like you’re going to a good dinner party when you go to work on Monday.”
-
-	
-
-
-
-
-
-
-
-
-
-
-
-	
-	
-		
-					Related Stories		
-	
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-	
-		
-					‘The Remarried Empress’ Becomes Most-Viewed Local Original Premiere Ever on Disney+ and Hulu		
-			
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-	
-		
-					The Game Awards Adds Disney+ to Livestream Lineup</p>
-<p>After the 600th episode of the Universal Television series wrapped, Wolf gathered the cast and crew for an actual dinner party, including the current cast and crew, Wolf COO Peter Jankowski and Christopher Meloni. Wolf made a speech at the beginning of the night, standing to tell the group, “This has never happened, and it will never happen again.”</p>
-<p>In a time when a show hitting 100 episodes is a major accomplishment, Hargitay never saw a world in which the NBC show would reach 600. But Wolf did, she says. And it was part of the speech she gave that night to her “SVU” family.</p>
-<p>“It really doesn’t feel totally real, which, in a way, is exactly how it should feel, because it’s as if we all get to live in this dream of what you thought might be possible someday. You’ve shown that it’s not only possible, but it’s so much better than anyone could have imagined,” she told Wolf. “If somebody told me that there was a show that’s been on the air for 600 episodes, I would say, ‘Really?’ That’s got to be tired. It’s got to be wheezing along. Must be running on fumes, or they’re catering to some mindless audience that just keeps coming back for some unknown reason. But here we are with a show that is healthy, that’s muscular, that’s fresh, smart, honest, and just so damn important. And yes, people keep coming back, but not for some unknown reason.”</p>
-<p>She continued, “They keep coming back because you started something very special that we’ve all had the great privilege of carrying forward for all these years.”</p>
-<p>For Hargitay, she can’t help but get emotional thinking about the love and respect the group has for one another, and for the set environment they’ve all created. It’s an environment guest stars thrive in — just look at the roster of them over the last 600 episodes — and always compliment when they arrive and leave the show.</p>
-<p>“People are happy to be there. I love making a space that’s conducive to creating, and I love making a space where people feel safe enough to try, to risk, to play, and to hunker down, and know that we’re not playing around here,” she says. “This is someone’s life. This is serious, and these are important stories. I’m so grateful.”</p>
-<p>For the milestone episode, written by showrunner Michele Fazekas and directed by Brenna Malloy, jury consultant Gwen Sharpe (J. Smith-Cameron) convinces Benson to take another look at an old case that put a man in prison for a 1998 rape and murder. When Benson revisits it, she realizes that she worked the case with Stabler (Christopher Meloni). Hesitant at first — since he failed to follow up on leads that could have revealed the truth and cut Benson out of the interrogation — Stabler ultimately joins Benson to help.</p>
-<p>While they haven’t worked together in years, he’s eager to join her on a road trip to dig deeper and put the right person behind bars. Captain Renee Curry steps in, saying, “With respect, Captain, he’s not your partner anymore. You don’t need his buy-in.” Fin quickly responds, “It doesn’t matter. Some partnerships don’t end, even when they do.”</p>
-<p>The storyline stirs up complicated feelings for both Benson and Stabler, as she realizes (and tells him), “I let you shut me out… I have to live with the fact that I didn’t do the right thing because I was new, that I didn’t follow my instinct because I thought you knew better.”</p>
-<p>For the first time with him, she really uses her voice with him as she discovers how different they both are from who they used to be when they worked together. And that’s ok — because that partnership is forever.</p>
-<p>The episode came in nearly 12 minutes over time, says Hargitay. “This was a big one. We were writing and rewriting and playing, and we had to shoot some scenes before we knew exactly what a scene was going to be, so there were a lot of different ways it could go. But it’s an embarrassment of riches.”</p>
-                <p style="margin-top: 25px;">
-                    <a href="https://variety.com/2026/tv/news/law-and-order-svu-600th-episode-1236947263/" target="_blank" rel="nofollow noopener" style="color: #0d6efd; text-decoration: none; font-weight: bold;">
                         &rarr; Baca artikel asli
                     </a>
                 </p>
